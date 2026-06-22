@@ -1,0 +1,33 @@
+language: en-US
+reviews:
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  auto_review:
+    enabled: true
+    drafts: false
+  path_instructions:
+    - path: "cmd/**"
+      instructions: |
+        Review CLI commands for consistent UX patterns, proper error handling,
+        and correct SigV4 authentication usage.
+    - path: "internal/**"
+      instructions: |
+        Review internal packages for Go best practices, proper error wrapping,
+        and clean separation of concerns between CLI commands and service logic.
+    - path: "trusted-actions/**"
+      instructions: |
+        Review Trusted Action definitions for security: verify RBAC follows
+        least-privilege, scripts don't access secrets in clusters-* namespaces,
+        params are properly validated, and timeout_seconds is reasonable.
+    - path: "image/**"
+      instructions: |
+        Review entrypoint scripts for proper error handling, output size
+        validation, and no sensitive data leakage in logs.
+    - path: "Containerfile*"
+      instructions: |
+        Review container images for minimal base images, no unnecessary tools,
+        non-root execution, and proper layer caching.
+chat:
+  auto_reply: true
