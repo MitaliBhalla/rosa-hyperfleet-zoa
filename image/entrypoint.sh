@@ -62,19 +62,22 @@ if [ "$COMBINED" -gt "$BUDGET" ]; then
 fi
 
 LOG_B64=$(base64 -w0 "$EXEC_LOG")
-PATCH="{\"binaryData\":{\"execution.log\":\"${LOG_B64}\""
+PATCH_FILE="/tmp/patch.json"
 
-if [ -f /artifacts/output.json ]; then
-  OUTPUT_B64=$(base64 -w0 /artifacts/output.json)
-  PATCH="${PATCH},\"output.json\":\"${OUTPUT_B64}\""
-fi
+{
+  printf '{"binaryData":{"execution.log":"%s"' "$LOG_B64"
+  if [ -f /artifacts/output.json ]; then
+    OUTPUT_B64=$(base64 -w0 /artifacts/output.json)
+    printf ',"output.json":"%s"' "$OUTPUT_B64"
+  fi
+  printf '},"data":{"exit-code":"%s"}}' "${EXIT_CODE}"
+} > "$PATCH_FILE"
 
-PATCH="${PATCH}},\"data\":{\"exit-code\":\"${EXIT_CODE}\"}}"
-
-if kubectl patch configmap "${OUTPUT_CM}" -n "${JOB_NAMESPACE}" --type=merge -p "${PATCH}" 2>&1; then
+if kubectl patch configmap "${OUTPUT_CM}" -n "${JOB_NAMESPACE}" --type=merge --patch-file "$PATCH_FILE" 2>&1; then
   echo "[$(ts)] configmap patched"
 else
   echo "[$(ts)] ERROR: failed to patch ConfigMap"
 fi
+rm -f "$PATCH_FILE"
 
 exit ${EXIT_CODE}
