@@ -113,7 +113,7 @@ lint:
 	@echo "Running golangci-lint..."
 	@if ! command -v golangci-lint > /dev/null 2>&1; then \
 		echo "Error: golangci-lint not found"; \
-		echo "Install: go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2"; \
+		echo "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"; \
 		exit 1; \
 	fi
 	@golangci-lint run --timeout=5m ./...

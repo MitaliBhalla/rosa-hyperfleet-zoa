@@ -47,7 +47,7 @@ The full execution flow: CLI → API Gateway → Platform API → DynamoDB + Mae
 - **Container image**: kubectl + aws-cli on minimal base
 - **Testing**: Go stdlib `testing` (unit tests), Ginkgo/Gomega (future integration/E2E)
 - **CI**: OpenShift CI (Prow + ci-operator)
-- **Linting**: golangci-lint v1.62.2 (required, no fallback)
+- **Linting**: golangci-lint v2.12+ (required, no fallback; config in `.golangci.yml`)
 
 ## Build & Test Commands
 
@@ -78,7 +78,7 @@ make help         # Show all available targets
 - **Security invariant**: TA templates must never request secrets access in `clusters-*` namespaces
 - **Two privilege scopes**: `kube-api` (Kubernetes operations, per-execution SA) and `aws-api` (AWS CLI, static SA with Pod Identity)
 - **Conventional commits**: Use `feat:`, `fix:`, `docs:`, `chore:` prefixes
-- **golangci-lint required**: Must be installed locally (`go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2`)
+- **golangci-lint required**: Must be installed locally (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`)
 - **Architecture**: See README.md for the system diagram
 
 ## Development Guidelines
@@ -108,7 +108,7 @@ make help         # Show all available targets
 
 - Run `make all` before pushing to ensure everything passes (format, vet, lint, test, build)
 - `make verify` runs the same read-only checks as CI (fmt-check, vet, lint)
-- `golangci-lint` is a hard requirement — install with: `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2`
+- `golangci-lint` is a hard requirement — install with: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
 
 ### Formatting
 

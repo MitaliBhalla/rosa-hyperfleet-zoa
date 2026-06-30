@@ -141,6 +141,7 @@ rosa-hyperfleet-zoa/
 │   ├── dependabot.yml      Automated dependency updates
 │   └── workflows/          GitHub Actions (release)
 ├── Containerfile           zoa-tools multi-arch image (UBI9 Minimal)
+├── .golangci.yml           Linter config (v2 format, std-error-handling preset)
 ├── Makefile                Build, test, lint, image targets
 ├── go.mod / go.sum         Go module dependencies
 └── CLAUDE.md               AI agent guidance
@@ -245,7 +246,7 @@ zoa completion fish | source
 ### Prerequisites
 
 - **Go 1.25+** — install from [go.dev/dl](https://go.dev/dl/) or via GVM
-- **golangci-lint v1.62.2** — `go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.62.2`
+- **golangci-lint v2.12+** — `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
 - **Make**
 - **AWS CLI v2** — with a profile configured for your environment
 
@@ -299,7 +300,7 @@ Use [conventional commits](https://www.conventionalcommits.org/):
 feat: add new trusted action command
 fix: handle timeout in dispatch request
 docs: update development guide
-chore: bump golangci-lint to v1.63.0
+chore: bump golangci-lint to v2.13.0
 ```
 
 ### Releasing
