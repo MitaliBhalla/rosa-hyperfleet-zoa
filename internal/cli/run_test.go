@@ -58,13 +58,13 @@ func TestBuildParams(t *testing.T) {
 			},
 		},
 		{
-			name: "When custom param overrides a flag it should use param value",
+			name: "When custom param conflicts with a flag it should preserve the flag value",
 			opts: &runOptions{
 				namespace: "cert-manager",
 				params:    []string{"namespace=override"},
 			},
 			expected: map[string]string{
-				"namespace": "override",
+				"namespace": "cert-manager",
 			},
 		},
 		{

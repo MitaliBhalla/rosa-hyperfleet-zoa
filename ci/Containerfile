@@ -10,7 +10,7 @@ golangci-lint --version
 
 # Pre-create cache directories writable by any UID (OpenShift runs as random UID)
 RUN mkdir -p /tmp/.golangci-lint-cache /tmp/.gocache /tmp/.gomodcache && \
-chmod -R 777 /tmp/.golangci-lint-cache /tmp/.gocache /tmp/.gomodcache
+chmod -R 775 /tmp/.golangci-lint-cache /tmp/.gocache /tmp/.gomodcache
 
 ENV GOFLAGS="-mod=mod"
 ENV GOLANGCI_LINT_CACHE=/tmp/.golangci-lint-cache

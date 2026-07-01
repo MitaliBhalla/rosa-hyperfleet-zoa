@@ -1,5 +1,5 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
 
 ts() { date -u '+%H:%M:%S'; }
 ts_at() { date -u -d "@$1" '+%H:%M:%S'; }
@@ -16,7 +16,7 @@ echo "[$(ts_at $T0)] upload starting, waiting for runner (timeout: ${EXEC_TIMEOU
 
 while true; do
   STATUS=$(kubectl get job "${RUNNER_JOB}" -n "${NS}" \
-    -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null)
+    -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null) || true
   case "$STATUS" in
     *Complete*|*Failed*) break ;;
   esac
@@ -32,7 +32,7 @@ T1=$(date +%s)
 WAIT_S=$((T1 - T0))
 echo "[$(ts_at $T1)] runner done (${WAIT_S}s), reading configmap"
 
-CM_JSON=$(kubectl get configmap "${OUTPUT_CM}" -n "${NS}" -o json 2>/dev/null)
+CM_JSON=$(kubectl get configmap "${OUTPUT_CM}" -n "${NS}" -o json 2>/dev/null) || true
 LOG_B64=$(printf '%s' "$CM_JSON" | jq -r '.binaryData["execution.log"] // empty')
 OUTPUT_B64=$(printf '%s' "$CM_JSON" | jq -r '.binaryData["output.json"] // empty')
 EXIT_CODE=$(printf '%s' "$CM_JSON" | jq -r '.data["exit-code"] // "1"')
@@ -47,8 +47,8 @@ if [ -z "${LOG_B64}" ] && [ -z "${OUTPUT_B64}" ]; then
 fi
 
 mkdir -p /tmp/upload
-[ -n "${LOG_B64}" ] && printf '%s' "${LOG_B64}" | base64 -d > /tmp/upload/execution.log
-[ -n "${OUTPUT_B64}" ] && printf '%s' "${OUTPUT_B64}" | base64 -d > /tmp/upload/output.json
+if [ -n "${LOG_B64}" ]; then printf '%s' "${LOG_B64}" | base64 -d > /tmp/upload/execution.log; fi
+if [ -n "${OUTPUT_B64}" ]; then printf '%s' "${OUTPUT_B64}" | base64 -d > /tmp/upload/output.json; fi
 
 T3=$(date +%s)
 DECODE_S=$((T3 - T2))

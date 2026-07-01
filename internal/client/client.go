@@ -57,16 +57,18 @@ func extractRegion(apiURL string) (string, error) {
 
 func (c *Client) Dispatch(ctx context.Context, action string, req *DispatchRequest) (*DispatchResponse, error) {
 	var resp DispatchResponse
-	if err := c.do(ctx, http.MethodPost, "/trusted-actions/"+action+"/run", req, &resp); err != nil {
+	if err := c.do(ctx, http.MethodPost, "/trusted-actions/"+url.PathEscape(action)+"/run", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
 }
 
 func (c *Client) GetExecution(ctx context.Context, id string, include string) (*Execution, error) {
-	path := "/trusted-actions/runs/" + id
+	path := "/trusted-actions/runs/" + url.PathEscape(id)
 	if include != "" {
-		path += "?include=" + include
+		q := url.Values{}
+		q.Set("include", include)
+		path += "?" + q.Encode()
 	}
 	var resp Execution
 	if err := c.do(ctx, http.MethodGet, path, nil, &resp); err != nil {
@@ -89,7 +91,7 @@ func (c *Client) ListExecutions(ctx context.Context, query url.Values) (*Executi
 
 func (c *Client) GetAction(ctx context.Context, name string) (*Action, error) {
 	var resp Action
-	if err := c.do(ctx, http.MethodGet, "/trusted-actions/"+name, nil, &resp); err != nil {
+	if err := c.do(ctx, http.MethodGet, "/trusted-actions/"+url.PathEscape(name), nil, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -153,7 +155,8 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 	}
 	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(resp.Body)
+	const maxResponseSize = 10 << 20 // 10 MB
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseSize))
 	if err != nil {
 		return fmt.Errorf("reading response: %w", err)
 	}
@@ -163,7 +166,11 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Code != "" {
 			return &apiErr
 		}
-		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+		body := string(respBody)
+		if len(body) > 512 {
+			body = body[:512] + "...(truncated)"
+		}
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
 	}
 
 	if result != nil {

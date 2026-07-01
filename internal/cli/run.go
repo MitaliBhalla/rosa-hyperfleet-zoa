@@ -260,7 +260,9 @@ func buildParams(opts *runOptions) map[string]string {
 	for _, p := range opts.params {
 		key, val, ok := strings.Cut(p, "=")
 		if ok {
-			params[key] = val
+			if _, exists := params[key]; !exists {
+				params[key] = val
+			}
 		}
 	}
 

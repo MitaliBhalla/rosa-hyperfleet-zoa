@@ -65,7 +65,7 @@ tidy:
 
 test:
 	@echo "Running unit tests..."
-	@go test -v -race -coverprofile=coverage.out ./internal/... ./cmd/... 2>.test-stderr; \
+	@go test -v -race -coverprofile=coverage.out ./... 2>.test-stderr; \
 	rc=$$?; \
 	if [ $$rc -ne 0 ] && grep -q "no such tool.*covdata" .test-stderr; then \
 		echo ""; \

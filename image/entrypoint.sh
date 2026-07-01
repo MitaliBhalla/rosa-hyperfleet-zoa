@@ -1,21 +1,24 @@
 #!/bin/bash
-set -uo pipefail
+set -euo pipefail
 
 ts() { date -u '+%H:%M:%S'; }
 EXEC_LOG="/artifacts/execution.log"
 
+set +o pipefail
 {
   echo "[$(ts)] runner starting"
   echo "[zoa] execution_id=${RUN_ID} action=${ACTION_NAME} target=${CLUSTER_ID}"
   echo "[zoa] operator=${OPERATOR} scope=${SCOPE} type=${TYPE}"
   echo "[zoa] revision=${REVISION}"
-  PARAMS=$(env | grep "^PARAM_" | sed 's/^PARAM_//' | tr '\n' ' ')
+  PARAMS=$(env | grep "^PARAM_" | sed 's/^PARAM_//' | tr '\n' ' ') || true
   [ -n "$PARAMS" ] && echo "[zoa] params=${PARAMS}"
   echo "[zoa] started_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
   echo "---"
   /zoa/run.sh
+  exit $?
 } 2>&1 | tee "$EXEC_LOG"
 EXIT_CODE=${PIPESTATUS[0]}
+set -o pipefail
 
 {
   echo "---"
