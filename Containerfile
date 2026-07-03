@@ -1,4 +1,5 @@
-FROM registry.access.redhat.com/ubi9/ubi-minimal:latest
+ARG UBI_VERSION="9.8-1782797275"
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${UBI_VERSION}
 
 ARG TARGETARCH=amd64
 ARG OC_VERSION="stable-4.21"

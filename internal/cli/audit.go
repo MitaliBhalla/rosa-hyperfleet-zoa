@@ -1,0 +1,142 @@
+package cli
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/openshift-online/rosa-hyperfleet-zoa/internal/output"
+)
+
+type auditOptions struct {
+	target   string
+	action   string
+	operator string
+	method   string
+	approval string
+	since    string
+	limit    int
+}
+
+func newAuditCommand(global *GlobalOptions) *cobra.Command {
+	opts := &auditOptions{}
+
+	cmd := &cobra.Command{
+		Use:   "audit [flags]",
+		Short: "View audit log of API calls",
+		Example: `  # Show last 50 audit entries (default)
+  zoa audit
+
+  # Show API calls from the last 24 hours
+  zoa audit --since 24h
+
+  # Show only executions (no GETs) in the last hour
+  zoa audit --method POST --since 1h
+
+  # All activity by a specific operator
+  zoa audit --operator slopezma --since 7d
+
+  # Writes to a specific cluster
+  zoa audit --action rollout_restart -t mc-useast1-1
+
+  # Filter by approval state
+  zoa audit --approval not_required --since 7d
+
+  # Max history (up to 200 entries)
+  zoa audit --limit 200 --since 7d
+
+  # JSON output — see full non-truncated values
+  zoa audit -o json | jq '.items[] | {timestamp, operator, action, path}'
+
+  # JSON with jq filtering — find errors (4xx/5xx)
+  zoa audit -o json | jq '.items[] | select(.status_code >= 400)'`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return listAudit(cmd.Context(), global, opts)
+		},
+	}
+
+	cmd.Flags().StringVarP(&opts.target, "target", "t", "", "Filter by target cluster")
+	cmd.Flags().StringVar(&opts.action, "action", "", "Filter by action name")
+	cmd.Flags().StringVar(&opts.operator, "operator", "", "Filter by operator")
+	cmd.Flags().StringVar(&opts.method, "method", "", "Filter by HTTP method (GET|POST)")
+	cmd.Flags().StringVar(&opts.approval, "approval", "", "Filter by approval state")
+	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
+	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results (max 200)")
+
+	return cmd
+}
+
+func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) error {
+	c, err := newClient(global)
+	if err != nil {
+		return err
+	}
+
+	query := url.Values{}
+	if opts.target != "" {
+		query.Set("target", opts.target)
+	}
+	if opts.action != "" {
+		query.Set("action", opts.action)
+	}
+	if opts.operator != "" {
+		query.Set("operator", opts.operator)
+	}
+	if opts.method != "" {
+		query.Set("method", opts.method)
+	}
+	if opts.approval != "" {
+		query.Set("approval_state", opts.approval)
+	}
+	if opts.since != "" {
+		query.Set("since", opts.since)
+	}
+	if opts.limit > 0 {
+		query.Set("limit", fmt.Sprintf("%d", opts.limit))
+	}
+
+	list, err := c.ListAudit(ctx, query)
+	if err != nil {
+		return err
+	}
+
+	if global.OutputFormat == output.FormatJSON {
+		return output.JSON(os.Stdout, list)
+	}
+
+	if len(list.Items) == 0 {
+		fmt.Fprintln(os.Stderr, "No audit entries found")
+		return nil
+	}
+
+	fmt.Fprintf(os.Stdout, "%-19s  %-6s  %-4s  %-12s  %-25s  %-20s  %-14s  %-14s  %-36s  %s\n",
+		"TIMESTAMP", "METHOD", "CODE", "OPERATOR", "ACTION", "TARGET", "JIRA", "APPROVAL", "EXEC_ID", "PATH")
+
+	for _, e := range list.Items {
+		ts := e.Timestamp
+		if len(ts) >= 19 {
+			ts = strings.Replace(ts[:19], "T", " ", 1)
+		}
+
+		path := strings.TrimPrefix(output.Dash(e.Path), "/api/v0/trusted-actions/")
+
+		fmt.Fprintf(os.Stdout, "%-19s  %-6s  %-4d  %-12s  %-25s  %-20s  %-14s  %-14s  %-36s  %s\n",
+			ts,
+			e.Method,
+			e.StatusCode,
+			output.Truncate(output.Dash(e.Operator), 12),
+			output.Truncate(output.Dash(e.Action), 25),
+			output.Truncate(output.Dash(e.TargetCluster), 20),
+			output.Truncate(output.Dash(e.Jira), 14),
+			output.Truncate(output.Dash(e.ApprovalState), 14),
+			output.Dash(e.ExecutionID),
+			path,
+		)
+	}
+
+	return nil
+}
