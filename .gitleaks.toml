@@ -1,0 +1,15 @@
+# Allowlist for PwnedAlert / rh-pre-commit / rh-gitleaks false positives.
+# Covers current AND historical commits.
+#
+# The excluded file contains AWS example/placeholder credentials from official docs:
+# https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html
+#
+# Reference for handling false positives:
+# https://source.redhat.com/departments/it/it_information_security/wiki/pattern_distribution_server#handling-false-positives
+
+[allowlist]
+  description = "False positives - AWS example credentials in test fixtures"
+
+  paths = [
+    '''internal/client/client_test\.go''',
+  ]

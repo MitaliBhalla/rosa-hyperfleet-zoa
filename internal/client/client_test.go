@@ -14,9 +14,9 @@ type staticCredentials struct{}
 
 func (s staticCredentials) Retrieve(ctx context.Context) (aws.Credentials, error) {
 	return aws.Credentials{
-		AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",
-		SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-		SessionToken:    "FwoGZXIvYXdzEBYaDHqa0AP",
+		AccessKeyID:     "AKIAIOSFODNN7EXAMPLE",                     // notsecret -- AWS docs example credentials
+		SecretAccessKey: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY", // notsecret -- AWS docs example credentials
+		SessionToken:    "FwoGZXIvYXdzEBYaDHqa0AP",                  // notsecret -- test fixture, not a real token
 		Source:          "test",
 	}, nil
 }
