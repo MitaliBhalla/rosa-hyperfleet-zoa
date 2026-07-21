@@ -1,12 +1,12 @@
 # See the OWNERS docs at https://www.kubernetes.dev/docs/guide/owners/
 reviewers: []
 approvers:
+  - Makdaam
   - cdoan1
-  - iamkirkbater
-  - typeid
-  - theautoroboto
   - jmelis
-  - ravitri
-  - syncrou
+  - newtonheath
   - psav
+  - ravitri
   - slopezz
+  - theautoroboto
+  - typeid
