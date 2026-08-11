@@ -1,146 +1,113 @@
-.PHONY: all build clean install test fmt fmt-check vet lint verify tidy image image-push image-clean help
+.PHONY: all build clean install test fmt fmt-check vet lint verify tidy \
+       image image-runner image-push image-push-runner help
 
-BINARY_NAME=zoa
-BUILD_DIR=./bin
-IMAGE_REPO ?= quay.io/slopezz/zoa-tools
-IMAGE_TAG ?= latest
-GIT_COMMIT=$(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-VERSION = 0.1.0
+BINARY_NAME = zoa
+BUILD_DIR   = ./bin
+
+# Container images
+IMAGE_REPO        ?= quay.io/slopezz/zoa-lambda
+RUNNER_IMAGE_REPO ?= quay.io/slopezz/zoa-runner
+IMAGE_TAG         ?= latest
+GIT_COMMIT        = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
 CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || echo docker)
-VERSION_PKG=github.com/openshift-online/rosa-hyperfleet-zoa/internal/version
-LDFLAGS=-ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-all: fmt vet lint test build
-	@echo ""
-	@echo "✓ All checks and build completed successfully!"
+VERSION     = 0.2.0
+VERSION_PKG = github.com/openshift-online/rosa-hyperfleet-zoa/internal/version
+LDFLAGS     = -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-help:
-	@echo "Available targets:"
-	@echo ""
-	@echo "Build & Install:"
-	@echo "  all             - Run all checks (fmt, vet, lint, test, build)"
-	@echo "  build           - Build the $(BINARY_NAME) binary"
-	@echo "  clean           - Remove built binaries and test artifacts"
-	@echo "  install         - Install $(BINARY_NAME) to GOPATH/bin"
-	@echo "  tidy            - Tidy go modules"
-	@echo ""
-	@echo "Testing:"
-	@echo "  test            - Run unit tests"
-	@echo ""
-	@echo "Code Quality:"
-	@echo "  fmt             - Format Go code with gofmt"
-	@echo "  fmt-check       - Check if Go code is formatted (non-destructive)"
-	@echo "  vet             - Run go vet for suspicious code"
-	@echo "  lint            - Run golangci-lint"
-	@echo "  verify          - Run all checks (fmt-check, vet, lint)"
-	@echo ""
-	@echo "Container Image:"
-	@echo "  image           - Build multi-arch image (amd64 + arm64)"
-	@echo "  image-push      - Build multi-arch + push manifest list"
-	@echo "  image-clean     - Remove built container images"
-	@echo ""
-	@echo "  help            - Show this help message"
+# =============================================================================
+# Default
+# =============================================================================
+
+all: verify test build
+
+# =============================================================================
+# Build
+# =============================================================================
 
 build:
-	@echo "Building $(BINARY_NAME)..."
 	@mkdir -p $(BUILD_DIR)
 	@go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/zoa/
-	@echo "✓ Build complete: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)"
 
 clean:
-	@echo "Cleaning up..."
-	@rm -f $(BUILD_DIR)/$(BINARY_NAME)
-	@rm -f coverage.out
-	@echo "✓ Clean complete"
+	@rm -rf $(BUILD_DIR) coverage.out
 
 install:
-	@echo "Installing $(BINARY_NAME) to GOPATH/bin..."
 	@go install $(LDFLAGS) ./cmd/zoa/
-	@echo "✓ Installation complete"
 
 tidy:
-	@echo "Tidying go modules..."
-	@GOFLAGS=-mod=mod go mod tidy
-	@echo "✓ Tidy complete"
+	@go mod tidy
+
+# =============================================================================
+# Test
+# =============================================================================
 
 test:
-	@echo "Running unit tests..."
-	@go test -v -race -coverprofile=coverage.out ./... 2>.test-stderr; \
-	rc=$$?; \
-	if [ $$rc -ne 0 ] && grep -q "no such tool.*covdata" .test-stderr; then \
-		echo ""; \
-		echo "ERROR: Tests passed but coverage failed — missing 'covdata' tool (GVM issue)."; \
-		echo ""; \
-		echo "Fix with:"; \
-		echo "  chmod u+w \$$(go env GOROOT)/pkg/tool/linux_amd64/"; \
-		echo "  GOWORK=off go build -o \$$(go env GOROOT)/pkg/tool/linux_amd64/covdata cmd/covdata"; \
-		echo ""; \
-		echo "Or install Go from https://go.dev/dl/ instead of GVM."; \
-		rm -f .test-stderr; \
-		exit 1; \
-	elif [ $$rc -ne 0 ]; then \
-		cat .test-stderr >&2; \
-		rm -f .test-stderr; \
-		exit $$rc; \
-	fi; \
-	rm -f .test-stderr
-	@echo "✓ Unit tests passed"
+	@go test -race -coverprofile=coverage.out ./...
 
-# Code Quality Targets
+# =============================================================================
+# Code Quality
+# =============================================================================
+
 fmt:
-	@echo "Formatting Go code..."
 	@gofmt -w -s .
-	@echo "✓ Formatting complete"
 
 fmt-check:
-	@echo "Checking code formatting..."
-	@files=$$(gofmt -l .); \
-	if [ -n "$$files" ]; then \
-		echo "The following files are not formatted:"; \
-		echo "$$files"; \
-		echo ""; \
-		echo "Run 'make fmt' to format them"; \
-		exit 1; \
-	fi
-	@echo "✓ All files are properly formatted"
+	@test -z "$$(gofmt -l .)" || (echo "Run 'make fmt'" && gofmt -l . && exit 1)
 
 vet:
-	@echo "Running go vet..."
 	@go vet ./...
-	@echo "✓ go vet passed"
 
 lint:
-	@echo "Running golangci-lint..."
-	@if ! command -v golangci-lint > /dev/null 2>&1; then \
-		echo "Error: golangci-lint not found"; \
-		echo "Install: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2"; \
-		exit 1; \
-	fi
 	@golangci-lint run --timeout=5m ./...
-	@echo "✓ golangci-lint passed"
 
 verify: fmt-check vet lint
+
+# =============================================================================
+# Container Images
+# =============================================================================
+
+image:
+	$(CONTAINER_RUNTIME) build \
+		--platform linux/amd64 \
+		-t $(IMAGE_REPO):$(IMAGE_TAG) \
+		-f Containerfile .
+
+image-runner:
+	$(CONTAINER_RUNTIME) build \
+		--platform linux/amd64 \
+		-t $(RUNNER_IMAGE_REPO):$(IMAGE_TAG) \
+		-f Containerfile.runner .
+
+image-push: image
+	$(CONTAINER_RUNTIME) push $(IMAGE_REPO):$(IMAGE_TAG)
+	$(CONTAINER_RUNTIME) tag $(IMAGE_REPO):$(IMAGE_TAG) $(IMAGE_REPO):$(GIT_COMMIT)
+	$(CONTAINER_RUNTIME) push $(IMAGE_REPO):$(GIT_COMMIT)
+
+image-push-runner: image-runner
+	$(CONTAINER_RUNTIME) push $(RUNNER_IMAGE_REPO):$(IMAGE_TAG)
+	$(CONTAINER_RUNTIME) tag $(RUNNER_IMAGE_REPO):$(IMAGE_TAG) $(RUNNER_IMAGE_REPO):$(GIT_COMMIT)
+	$(CONTAINER_RUNTIME) push $(RUNNER_IMAGE_REPO):$(GIT_COMMIT)
+
+# =============================================================================
+# Help
+# =============================================================================
+
+help:
+	@echo "Build:"
+	@echo "  build              Build zoa CLI (./bin/zoa)"
+	@echo "  install            Install zoa to GOPATH/bin"
+	@echo "  clean              Remove build artifacts"
 	@echo ""
-	@echo "✓ All verification checks passed!"
-
-
-# --- Container image targets ---
-
-image: ## Build multi-arch image (amd64 + arm64)
-	$(CONTAINER_RUNTIME) manifest rm $(IMAGE_REPO):$(IMAGE_TAG) 2>/dev/null || true
-	$(CONTAINER_RUNTIME) rmi $(IMAGE_REPO):$(IMAGE_TAG) 2>/dev/null || true
-	$(CONTAINER_RUNTIME) build $(if $(NOCACHE),--no-cache) --platform linux/amd64 \
-		--manifest $(IMAGE_REPO):$(IMAGE_TAG) \
-		-f Containerfile .
-	$(CONTAINER_RUNTIME) build $(if $(NOCACHE),--no-cache) --platform linux/arm64 \
-		--manifest $(IMAGE_REPO):$(IMAGE_TAG) \
-		-f Containerfile .
-
-image-push: image ## Build multi-arch and push manifest list
-	@if [ "$(GIT_COMMIT)" = "unknown" ]; then echo "ERROR: no git commit — refusing to push untracked image"; exit 1; fi
-	$(CONTAINER_RUNTIME) manifest push $(IMAGE_REPO):$(IMAGE_TAG)
-	$(CONTAINER_RUNTIME) manifest push $(IMAGE_REPO):$(IMAGE_TAG) docker://$(IMAGE_REPO):$(GIT_COMMIT)
-
-image-clean: ## Remove built container images
-	$(CONTAINER_RUNTIME) rmi $(IMAGE_REPO):$(IMAGE_TAG) 2>/dev/null || true
-	$(CONTAINER_RUNTIME) rmi $(IMAGE_REPO):$(GIT_COMMIT) 2>/dev/null || true
+	@echo "Test & Quality:"
+	@echo "  test               Run unit tests with race detection"
+	@echo "  verify             fmt-check + vet + lint"
+	@echo "  fmt                Format code"
+	@echo ""
+	@echo "Images:"
+	@echo "  image              Build zoa-lambda image (primary)"
+	@echo "  image-runner       Build zoa-runner image (async Jobs + CLI)"
+	@echo "  image-push         Build + push zoa-lambda"
+	@echo "  image-push-runner  Build + push zoa-runner"

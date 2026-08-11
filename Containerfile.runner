@@ -16,29 +16,34 @@ RUN GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown") && \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
     -buildvcs=false \
     -ldflags="-w -s -X ${VERSION_PKG}.Version=${ZOA_VERSION} -X ${VERSION_PKG}.GitCommit=${GIT_COMMIT} -X ${VERSION_PKG}.BuildDate=${BUILD_DATE}" \
-    -o /app/zoa-lambda ./cmd/zoa-lambda/
+    -o /app/zoa ./cmd/zoa/ && \
+    CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
+    -buildvcs=false \
+    -ldflags="-w -s -X ${VERSION_PKG}.Version=${ZOA_VERSION} -X ${VERSION_PKG}.GitCommit=${GIT_COMMIT} -X ${VERSION_PKG}.BuildDate=${BUILD_DATE}" \
+    -o /app/zoa-runner ./cmd/zoa-runner/
 
-# Lambda Web Adapter (enables response streaming for API mode)
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS lwa
-
-# Minimal Lambda runtime — Go static binary needs no OS dependencies
-FROM public.ecr.aws/lambda/provided:al2023-x86_64
+FROM registry.access.redhat.com/ubi9/ubi-minimal:9.8-1785339117
 
 ARG VERSION=0.0.1
 ARG RELEASE=1
 
-LABEL name="zoa-lambda" \
+LABEL name="zoa-runner" \
       vendor="Red Hat, Inc." \
       version="${VERSION}" \
       release="${RELEASE}" \
-      summary="ZOA Lambda function" \
-      description="Minimal Lambda image for ZOA API and Worker" \
-      io.k8s.display-name="zoa-lambda" \
-      com.redhat.component="zoa-lambda-container" \
+      summary="ZOA async Job runner and CLI" \
+      description="Runs Trusted Actions in K8s Jobs with S3 artifact upload" \
+      io.k8s.display-name="zoa-runner" \
+      io.k8s.description="ZOA async Job runner and CLI" \
+      com.redhat.component="zoa-runner-container" \
       distribution-scope="public" \
       url="https://github.com/openshift-online/rosa-hyperfleet-zoa"
 
-COPY --from=builder /app/zoa-lambda /usr/local/bin/zoa-lambda
-COPY --from=lwa /lambda-adapter /opt/extensions/lambda-adapter
+WORKDIR /app
 
-ENTRYPOINT ["/usr/local/bin/zoa-lambda"]
+COPY --from=builder /app/zoa /usr/local/bin/zoa
+COPY --from=builder /app/zoa-runner /usr/local/bin/zoa-runner
+
+USER 65534:65534
+
+ENTRYPOINT ["/usr/local/bin/zoa-runner"]
