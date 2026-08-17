@@ -12,18 +12,17 @@ import (
 )
 
 type runsOptions struct {
-	target       string
-	status       string
-	action       string
-	operator     string
-	scope        string
-	actionType   string
-	outputStatus string
-	approval     string
-	dryRun       bool
-	force        bool
-	since        string
-	limit        int
+	target        string
+	status        string
+	action        string
+	operator      string
+	scope         string
+	actionType    string
+	executionMode string
+	dryRun        bool
+	force         bool
+	since         string
+	limit         int
 }
 
 func newRunsCommand(global *GlobalOptions) *cobra.Command {
@@ -76,8 +75,7 @@ func newRunsCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.operator, "operator", "", "Filter by operator")
 	cmd.Flags().StringVar(&opts.scope, "scope", "", "Filter by scope (kube-api|aws-api)")
 	cmd.Flags().StringVar(&opts.actionType, "type", "", "Filter by type (read|write)")
-	cmd.Flags().StringVar(&opts.outputStatus, "output-status", "", "Filter by output status")
-	cmd.Flags().StringVar(&opts.approval, "approval", "", "Filter by approval state")
+	cmd.Flags().StringVar(&opts.executionMode, "execution-mode", "", "Filter by execution class (sync|async)")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Show only dry-run executions")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced executions")
 	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
@@ -87,7 +85,7 @@ func newRunsCommand(global *GlobalOptions) *cobra.Command {
 }
 
 func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}
@@ -111,11 +109,8 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 	if opts.actionType != "" {
 		query.Set("type", opts.actionType)
 	}
-	if opts.outputStatus != "" {
-		query.Set("output_status", opts.outputStatus)
-	}
-	if opts.approval != "" {
-		query.Set("approval_state", opts.approval)
+	if opts.executionMode != "" {
+		query.Set("execution_mode", opts.executionMode)
 	}
 	if opts.dryRun {
 		query.Set("dry_run", "true")
@@ -144,12 +139,13 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 		return nil
 	}
 
-	// Pre-compute dynamic column widths from actual data
+	wide := global.OutputFormat == output.FormatWide
+
 	type row struct {
 		created, operator, id, action, params, target string
-		scope, typ, status, outputSt                  string
-		jira, approval                                string
-		runner, upload, total                         string
+		scope, typ, status, rev, class                string
+		jira, total, outBytes                         string
+		dispatchedAt, completedAt, logBytes           string
 	}
 
 	rows := make([]row, 0, len(list.Items))
@@ -158,10 +154,14 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 	for _, e := range list.Items {
 		actionStr := e.Action
 		if e.DryRun {
-			actionStr += " [DRY]"
+			if e.RequestedAction != "" {
+				actionStr += " [DRY←" + e.RequestedAction + "]"
+			} else {
+				actionStr += " [DRY]"
+			}
 		}
 		if e.Force {
-			actionStr += " [FRC]"
+			actionStr += " [FORCED]"
 		}
 		params := formatParams(e.Params)
 
@@ -178,26 +178,61 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 			maxJira = len(e.Jira)
 		}
 
+		rev := output.Dash(e.Revision)
+		if len(rev) > 7 && rev != "-" {
+			rev = rev[:7]
+		}
+
 		rows = append(rows, row{
-			created:  output.FormatTimestamp(e.CreatedAt),
-			operator: output.Dash(e.Operator),
-			id:       e.ID,
-			action:   actionStr,
-			params:   params,
-			target:   e.TargetCluster,
-			scope:    e.Scope,
-			typ:      output.Dash(e.Type),
-			status:   e.Status,
-			outputSt: output.Dash(e.OutputStatus),
-			jira:     output.Dash(e.Jira),
-			approval: output.Dash(e.ApprovalState),
-			runner:   output.FormatDuration(e.RunnerSeconds),
-			upload:   output.FormatDuration(e.UploadSeconds),
-			total:    output.FormatDuration(e.DurationSeconds),
+			created:      output.FormatTimestamp(e.CreatedAt),
+			operator:     output.ShortOperator(e.Operator),
+			id:           e.ID,
+			action:       actionStr,
+			params:       params,
+			target:       e.TargetCluster,
+			scope:        e.Scope,
+			typ:          output.Dash(e.Type),
+			status:       e.Status,
+			rev:          rev,
+			class:        output.Dash(e.ExecutionMode),
+			jira:         output.Dash(e.Jira),
+			total:        output.FormatDuration(e.DurationMs),
+			outBytes:     output.FormatBytes(e.OutputBytes),
+			dispatchedAt: output.FormatTimestamp(e.DispatchedAt),
+			completedAt:  output.FormatTimestamp(e.CompletedAt),
+			logBytes:     output.FormatBytes(e.LogBytes),
 		})
 	}
 
-	// Cap dynamic widths to keep terminal readable
+	if wide {
+		tw := output.NewTable(os.Stdout)
+		fmt.Fprintln(tw, "CREATED_AT\tOPERATOR\tID\tACTION\tPARAMS\tTARGET\tSCOPE\tTYPE\tSTATUS\tREV\tMODE\tJIRA\tDUR\tOUT\tDISPATCHED_AT\tCOMPLETED_AT\tLOGS")
+		for _, r := range rows {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				r.created,
+				output.Truncate(r.operator, 20),
+				r.id,
+				r.action,
+				output.Truncate(r.params, 70),
+				r.target,
+				r.scope,
+				r.typ,
+				r.status,
+				r.rev,
+				r.class,
+				r.jira,
+				r.total,
+				r.outBytes,
+				r.dispatchedAt,
+				r.completedAt,
+				r.logBytes,
+			)
+		}
+		tw.Flush()
+		return nil
+	}
+
+	// Default table
 	if maxAction > 30 {
 		maxAction = 30
 	}
@@ -211,11 +246,11 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 		maxJira = 15
 	}
 
-	fmtStr := fmt.Sprintf("%%-19s  %%-12s  %%-36s  %%-%ds  %%-%ds  %%-%ds  %%-9s  %%-6s  %%-10s  %%-9s  %%-%ds  %%-13s  %%-5s  %%-5s  %%s\n",
+	fmtStr := fmt.Sprintf("%%-19s  %%-12s  %%-36s  %%-%ds  %%-%ds  %%-%ds  %%-9s  %%-6s  %%-12s  %%-7s  %%-6s  %%-%ds  %%-6s  %%s\n",
 		maxAction, maxParams, maxTarget, maxJira)
 
 	fmt.Fprintf(os.Stdout, fmtStr,
-		"CREATED_AT", "OPERATOR", "ID", "ACTION", "PARAMS", "TARGET", "SCOPE", "TYPE", "STATUS", "OUTPUT", "JIRA", "APPROVAL", "RUN", "UPL", "TOT")
+		"CREATED_AT", "OPERATOR", "ID", "ACTION", "PARAMS", "TARGET", "SCOPE", "TYPE", "STATUS", "REV", "MODE", "JIRA", "DUR", "OUT")
 
 	for _, r := range rows {
 		fmt.Fprintf(os.Stdout, fmtStr,
@@ -228,12 +263,11 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 			r.scope,
 			r.typ,
 			r.status,
-			r.outputSt,
+			r.rev,
+			r.class,
 			output.Truncate(r.jira, maxJira),
-			r.approval,
-			r.runner,
-			r.upload,
 			r.total,
+			r.outBytes,
 		)
 	}
 

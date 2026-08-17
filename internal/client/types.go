@@ -2,6 +2,7 @@ package client
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -9,29 +10,32 @@ import (
 type Execution struct {
 	ID              string            `json:"id"`
 	Action          string            `json:"action"`
-	ExecutedAction  string            `json:"executed_action,omitempty"`
+	RequestedAction string            `json:"requested_action,omitempty"`
 	TargetCluster   string            `json:"target_cluster"`
-	Status          string            `json:"status"`
-	OutputStatus    string            `json:"output_status,omitempty"`
-	ApprovalState   string            `json:"approval_state,omitempty"`
-	Scope           string            `json:"scope"`
-	Type            string            `json:"type"`
-	DryRun          bool              `json:"dry_run"`
-	Force           bool              `json:"force"`
-	Jira            string            `json:"jira,omitempty"`
-	Operator        string            `json:"operator,omitempty"`
-	Params          map[string]string `json:"params,omitempty"`
-	CreatedAt       *time.Time        `json:"created_at,omitempty"`
-	UpdatedAt       *time.Time        `json:"updated_at,omitempty"`
-	CompletedAt     *time.Time        `json:"completed_at,omitempty"`
-	DurationSeconds *int              `json:"duration_seconds,omitempty"`
-	RunnerSeconds   *int              `json:"runner_seconds,omitempty"`
-	UploadSeconds   *int              `json:"upload_seconds,omitempty"`
-	Output          FlexString        `json:"output,omitempty"`
-	Logs            string            `json:"logs,omitempty"`
+	Status         string            `json:"status"`
+	ExecutionMode string            `json:"execution_mode,omitempty"`
+	Scope          string            `json:"scope"`
+	Type           string            `json:"type"`
+	DryRun         bool              `json:"dry_run"`
+	Force          bool              `json:"force"`
+	Jira           string            `json:"jira,omitempty"`
+	Operator       string            `json:"operator,omitempty"`
+	Revision       string            `json:"revision,omitempty"`
+	Params         map[string]string `json:"params,omitempty"`
+	CreatedAt      *time.Time        `json:"created_at,omitempty"`
+	DispatchedAt   *time.Time        `json:"dispatched_at,omitempty"`
+	CompletedAt    *time.Time        `json:"completed_at,omitempty"`
+	DurationMs     *int64            `json:"duration_ms,omitempty"`
+	OutputBytes    *int64            `json:"output_bytes,omitempty"`
+	LogBytes       *int64            `json:"log_bytes,omitempty"`
+	OutputFormat   string            `json:"output_format,omitempty"`
+	Output         FlexString        `json:"output,omitempty"`
+	Logs           string            `json:"logs,omitempty"`
 }
 
 // FlexString handles API fields that may be a string, array, or object.
+// When unmarshaled, it stores the raw string content for human rendering.
+// When marshaled back to JSON, it re-parses to emit proper nested JSON.
 type FlexString string
 
 func (f *FlexString) UnmarshalJSON(data []byte) error {
@@ -39,31 +43,25 @@ func (f *FlexString) UnmarshalJSON(data []byte) error {
 		*f = ""
 		return nil
 	}
-	// Try string first
 	var s string
 	if err := json.Unmarshal(data, &s); err == nil {
 		*f = FlexString(s)
 		return nil
 	}
-	// Try array of objects — pretty-print each item
-	var arr []json.RawMessage
-	if err := json.Unmarshal(data, &arr); err == nil {
-		lines := make([]string, 0, len(arr))
-		for _, item := range arr {
-			var m map[string]interface{}
-			if json.Unmarshal(item, &m) == nil {
-				b, _ := json.Marshal(m)
-				lines = append(lines, string(b))
-			} else {
-				lines = append(lines, string(item))
-			}
-		}
-		*f = FlexString(strings.Join(lines, "\n"))
-		return nil
-	}
-	// Fallback: raw JSON
 	*f = FlexString(string(data))
 	return nil
+}
+
+func (f FlexString) MarshalJSON() ([]byte, error) {
+	s := string(f)
+	if s == "" {
+		return []byte("null"), nil
+	}
+	trimmed := strings.TrimSpace(s)
+	if (strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "{")) && json.Valid([]byte(trimmed)) {
+		return []byte(trimmed), nil
+	}
+	return json.Marshal(s)
 }
 
 func (f FlexString) String() string {
@@ -76,17 +74,23 @@ type ExecutionList struct {
 }
 
 type DispatchRequest struct {
-	TargetCluster string            `json:"target_cluster"`
-	Jira          string            `json:"jira"`
-	Params        map[string]string `json:"params,omitempty"`
-	Force         bool              `json:"force"`
-	DryRun        bool              `json:"dry_run"`
+	Jira           string            `json:"jira"`
+	Params         map[string]string `json:"params,omitempty"`
+	Force          bool              `json:"force"`
+	DryRun         bool              `json:"dry_run"`
+	ExecutionMode  string            `json:"execution_mode,omitempty"`
+	TimeoutSeconds int               `json:"timeout_seconds,omitempty"`
 }
 
 type DispatchResponse struct {
-	ID             string `json:"id"`
-	Status         string `json:"status"`
-	ExecutedAction string `json:"executed_action,omitempty"`
+	ID             string     `json:"id"`
+	Status         string     `json:"status"`
+	Target         string     `json:"target"`
+	ExecutedAction string     `json:"executed_action,omitempty"`
+	ExecutionMode  string     `json:"execution_mode,omitempty"`
+	Output         FlexString `json:"output,omitempty"`
+	Logs           string     `json:"logs,omitempty"`
+	DurationMs     *int64     `json:"duration_ms,omitempty"`
 }
 
 type ActionParam struct {
@@ -104,12 +108,13 @@ type Action struct {
 	Name                 string              `json:"name"`
 	Scope                string              `json:"scope"`
 	Type                 string              `json:"type"`
+	ExecutionMode        string              `json:"execution_mode,omitempty"`
 	Description          string              `json:"description"`
-	Params               []ActionParam       `json:"params,omitempty"`
-	RequiredFields       []string            `json:"required_fields,omitempty"`
+	Params               []ActionParam       `json:"parameters,omitempty"`
 	Authorization        ActionAuthorization `json:"authorization,omitempty"`
 	DryRunAction         string              `json:"dry_run_action,omitempty"`
 	WriteCooldownSeconds int                 `json:"write_cooldown_seconds,omitempty"`
+	TimeoutSeconds       int                 `json:"timeout_seconds,omitempty"`
 }
 
 type ActionList struct {
@@ -125,6 +130,8 @@ type AuditEntry struct {
 	Action        string `json:"action,omitempty"`
 	TargetCluster string `json:"target_cluster,omitempty"`
 	Jira          string `json:"jira,omitempty"`
+	Force         bool   `json:"force,omitempty"`
+	DryRun        bool   `json:"dry_run,omitempty"`
 	ApprovalState string `json:"approval_state,omitempty"`
 	ExecutionID   string `json:"execution_id,omitempty"`
 }
@@ -138,6 +145,15 @@ func (a AuditEntry) ShortPath() string {
 
 type AuditList struct {
 	Items []AuditEntry `json:"items"`
+}
+
+type ServerVersionInfo struct {
+	Version   string `json:"version"`
+	GitCommit string `json:"git_commit"`
+	BuildDate string `json:"build_date"`
+	GoVersion string `json:"go_version"`
+	Platform  string `json:"platform"`
+	Target    string `json:"target"`
 }
 
 type APIError struct {
@@ -154,4 +170,30 @@ func (e *APIError) Error() string {
 		return e.Message
 	}
 	return e.Code
+}
+
+// LambdaRuntimeError is returned by AWS Lambda Function URLs when the Lambda
+// function crashes, times out, or returns an unhandled error. The format differs
+// from ZOA's APIError.
+type LambdaRuntimeError struct {
+	ErrorMessage string `json:"errorMessage"`
+	ErrorType    string `json:"errorType"`
+}
+
+func (e *LambdaRuntimeError) Error() string {
+	switch e.ErrorType {
+	case "Runtime.ExitError":
+		return "ZOA API is unavailable (Lambda failed to start — check CloudWatch logs for startup health failures)"
+	case "Task timed out after", "Runtime.DeadlineExceeded":
+		return "ZOA API timed out (Lambda execution deadline exceeded)"
+	default:
+		if e.ErrorMessage != "" {
+			return fmt.Sprintf("ZOA API error [%s]: %s", e.ErrorType, e.ErrorMessage)
+		}
+		return fmt.Sprintf("ZOA API error: %s", e.ErrorType)
+	}
+}
+
+func (e *LambdaRuntimeError) IsUnavailable() bool {
+	return e.ErrorType == "Runtime.ExitError"
 }

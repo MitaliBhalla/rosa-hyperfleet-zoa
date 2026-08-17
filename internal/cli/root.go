@@ -7,6 +7,7 @@ import (
 	"os"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/spf13/cobra"
 
 	"github.com/openshift-online/rosa-hyperfleet-zoa/internal/client"
@@ -16,7 +17,12 @@ import (
 
 type GlobalOptions struct {
 	APIURL       string
+	Region       string
 	OutputFormat output.Format
+
+	// ClientFactory overrides client creation for testing.
+	// When nil, the real AWS-authenticated client is used.
+	ClientFactory func(*GlobalOptions) (APIClient, error)
 }
 
 func NewRootCommand() *cobra.Command {
@@ -28,7 +34,7 @@ func NewRootCommand() *cobra.Command {
 		Long: `ZOA executes audited Trusted Actions against target clusters via the Platform API.
 
 All operations are authenticated with AWS SigV4 using your current credentials.
-Set API_URL to your regional API Gateway endpoint.`,
+Set ZOA_API_URL to your ZOA endpoint (Function URL, API Gateway, or CNAME).`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
@@ -40,15 +46,16 @@ Set API_URL to your regional API Gateway endpoint.`,
 				return nil
 			}
 			if opts.APIURL == "" {
-				return fmt.Errorf("API_URL not set\n\n  export API_URL=\"https://<id>.execute-api.<region>.amazonaws.com/prod\"")
+				return fmt.Errorf("ZOA_API_URL not set\n\n  export ZOA_API_URL=\"https://<id>.lambda-url.<region>.on.aws\"")
 			}
 			return nil
 		},
 	}
 
-	cmd.PersistentFlags().StringVar(&opts.APIURL, "api-url", os.Getenv("API_URL"), "Platform API Gateway URL (env: API_URL)")
+	cmd.PersistentFlags().StringVar(&opts.APIURL, "api-url", os.Getenv("ZOA_API_URL"), "ZOA endpoint URL: Function URL, API Gateway, or CNAME (env: ZOA_API_URL)")
+	cmd.PersistentFlags().StringVar(&opts.Region, "region", os.Getenv("AWS_REGION"), "AWS region override for custom CNAME endpoints (env: AWS_REGION)")
 	var outputFlag string
-	cmd.PersistentFlags().StringVarP(&outputFlag, "output", "o", "table", "Output format: table, json")
+	cmd.PersistentFlags().StringVarP(&outputFlag, "output", "o", "table", "Output format: table, wide, json")
 	cobra.OnInitialize(func() {
 		opts.OutputFormat = output.ParseFormat(outputFlag)
 	})
@@ -56,7 +63,9 @@ Set API_URL to your regional API Gateway endpoint.`,
 	cmd.AddCommand(
 		newRunCommand(opts),
 		newGetCommand(opts),
+		newOutputCommand(opts),
 		newLogsCommand(opts),
+		newDownloadCommand(opts),
 		newRunsCommand(opts),
 		newActionsCommand(opts),
 		newDescribeCommand(opts),
@@ -68,29 +77,83 @@ Set API_URL to your regional API Gateway endpoint.`,
 	return cmd
 }
 
-func newClient(opts *GlobalOptions) (*client.Client, error) {
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background())
+func getClient(opts *GlobalOptions) (APIClient, error) {
+	if opts.ClientFactory != nil {
+		return opts.ClientFactory(opts)
+	}
+	return newRealClient(opts)
+}
+
+func newRealClient(opts *GlobalOptions) (*client.Client, error) {
+	ctx := context.Background()
+	cfg, err := awsconfig.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("loading AWS config: %w", err)
 	}
-	return client.New(opts.APIURL, cfg.Credentials)
+
+	stsClient := sts.NewFromConfig(cfg)
+	identity, err := stsClient.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, fmt.Errorf("getting caller identity: %w", err)
+	}
+
+	return client.New(opts.APIURL, cfg.Credentials, client.Options{
+		AccountID: *identity.Account,
+		Operator:  *identity.Arn,
+		Region:    opts.Region,
+	})
 }
 
 func newVersionCommand(global *GlobalOptions) *cobra.Command {
-	return &cobra.Command{
+	cmd := &cobra.Command{
 		Use:   "version",
-		Short: "Print version information",
-		Run: func(cmd *cobra.Command, args []string) {
-			info := version.Get()
+		Short: "Print client and server version information",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			clientInfo := version.Get()
+
 			if global.OutputFormat == output.FormatJSON {
+				result := map[string]interface{}{
+					"client": clientInfo,
+				}
+				if global.APIURL != "" {
+					c, err := getClient(global)
+					if err == nil {
+						if sv, err := c.ServerVersion(cmd.Context()); err == nil {
+							result["server"] = sv
+						} else {
+							result["server_error"] = err.Error()
+						}
+					}
+				}
 				enc := json.NewEncoder(os.Stdout)
 				enc.SetIndent("", "  ")
-				_ = enc.Encode(info)
-				return
+				return enc.Encode(result)
 			}
-			fmt.Println(info.String())
+
+			fmt.Printf("Client: %s\n", clientInfo.String())
+
+			if global.APIURL == "" {
+				fmt.Println("Server: (not configured — set ZOA_API_URL)")
+				return nil
+			}
+
+			c, err := getClient(global)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Server: error creating client: %v\n", err)
+				return nil
+			}
+			sv, err := c.ServerVersion(cmd.Context())
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Server: unreachable (%v)\n", err)
+				return nil
+			}
+			fmt.Printf("Server: zoa %s (commit: %s, built: %s, %s, %s)\n",
+				sv.Version, sv.GitCommit, sv.BuildDate, sv.GoVersion, sv.Platform)
+			fmt.Printf("Target: %s\n", sv.Target)
+			return nil
 		},
 	}
+	return cmd
 }
 
 func newCompletionCommand() *cobra.Command {

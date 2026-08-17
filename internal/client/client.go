@@ -20,39 +20,71 @@ import (
 type Client struct {
 	baseURL     string
 	region      string
+	sigService  string
 	credentials aws.CredentialsProvider
 	httpClient  *http.Client
 	signer      *v4.Signer
+	accountID   string
+	operator    string
+	timeout     time.Duration
 }
 
-func New(apiURL string, creds aws.CredentialsProvider) (*Client, error) {
-	region, err := extractRegion(apiURL)
-	if err != nil {
+// Options configures the ZOA client.
+type Options struct {
+	AccountID string // AWS account ID (derived from STS if empty)
+	Operator  string // SRE identity (email or IAM principal)
+	Region    string // AWS region override (auto-detected from URL if empty)
+}
+
+func New(apiURL string, creds aws.CredentialsProvider, opts Options) (*Client, error) {
+	region, service, err := parseEndpoint(apiURL)
+	if err != nil && opts.Region == "" {
 		return nil, err
+	}
+	if opts.Region != "" {
+		region = opts.Region
 	}
 
 	return &Client{
 		baseURL:     strings.TrimRight(apiURL, "/"),
 		region:      region,
+		sigService:  service,
 		credentials: creds,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:  &http.Client{},
 		signer:      v4.NewSigner(),
+		accountID:   opts.AccountID,
+		operator:    opts.Operator,
+		timeout:     30 * time.Second,
 	}, nil
 }
 
-func extractRegion(apiURL string) (string, error) {
+// WithTimeout returns a shallow copy of the Client with the given request timeout.
+func (c *Client) WithTimeout(d time.Duration) *Client {
+	cc := *c
+	cc.timeout = d
+	return &cc
+}
+
+// parseEndpoint extracts the AWS region and SigV4 service name from a URL.
+// Supported formats:
+//   - API Gateway:       <id>.execute-api.<region>.amazonaws.com  → service "execute-api"
+//   - Lambda Function URL: <id>.lambda-url.<region>.on.aws        → service "lambda"
+//   - Custom CNAME:      anything else                            → service "lambda", region must be provided via Options.Region
+func parseEndpoint(apiURL string) (region, service string, err error) {
 	u, err := url.Parse(apiURL)
 	if err != nil {
-		return "", fmt.Errorf("invalid API URL: %w", err)
+		return "", "", fmt.Errorf("invalid API URL: %w", err)
 	}
-	// Format: <id>.execute-api.<region>.amazonaws.com
 	parts := strings.Split(u.Host, ".")
 	for i, p := range parts {
 		if p == "execute-api" && i+1 < len(parts) {
-			return parts[i+1], nil
+			return parts[i+1], "execute-api", nil
+		}
+		if p == "lambda-url" && i+1 < len(parts) {
+			return parts[i+1], "lambda", nil
 		}
 	}
-	return "", fmt.Errorf("cannot extract region from URL %q (expected *.execute-api.<region>.amazonaws.com)", apiURL)
+	return "", "lambda", fmt.Errorf("cannot auto-detect region from URL %q; set AWS_REGION or use --region", apiURL)
 }
 
 func (c *Client) Dispatch(ctx context.Context, action string, req *DispatchRequest) (*DispatchResponse, error) {
@@ -117,7 +149,54 @@ func (c *Client) ListAudit(ctx context.Context, query url.Values) (*AuditList, e
 	return &resp, nil
 }
 
+// ServerVersion fetches the server's /version endpoint.
+func (c *Client) ServerVersion(ctx context.Context) (*ServerVersionInfo, error) {
+	var info ServerVersionInfo
+	if err := c.doRoot(ctx, http.MethodGet, "/version", nil, &info); err != nil {
+		return nil, err
+	}
+	return &info, nil
+}
+
+// RawGet performs a signed GET request and returns the raw HTTP response.
+// Caller is responsible for closing resp.Body.
+func (c *Client) RawGet(ctx context.Context, path string) (*http.Response, error) {
+	fullURL := c.baseURL + "/api/v0" + path
+
+	bodyReader := bytes.NewReader(nil)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("creating request: %w", err)
+	}
+
+	if c.signer != nil {
+		creds, err := c.credentials.Retrieve(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("retrieving AWS credentials: %w", err)
+		}
+
+		payloadHash := sha256Hash(bodyReader)
+		if err := c.signer.SignHTTP(ctx, creds, req, payloadHash, c.sigService, c.region, time.Now()); err != nil {
+			return nil, fmt.Errorf("signing request: %w", err)
+		}
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("executing request: %w", err)
+	}
+
+	return resp, nil
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body any, result any) error {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
 	fullURL := c.baseURL + "/api/v0" + path
 
 	var bodyReader io.ReadSeeker
@@ -137,6 +216,13 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	if c.accountID != "" {
+		req.Header.Set("X-Account-ID", c.accountID)
+	}
+	if c.operator != "" {
+		req.Header.Set("X-Operator", c.operator)
+	}
+
 	if c.signer != nil {
 		creds, err := c.credentials.Retrieve(ctx)
 		if err != nil {
@@ -144,7 +230,7 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 		}
 
 		payloadHash := sha256Hash(bodyReader)
-		if err := c.signer.SignHTTP(ctx, creds, req, payloadHash, "execute-api", c.region, time.Now()); err != nil {
+		if err := c.signer.SignHTTP(ctx, creds, req, payloadHash, c.sigService, c.region, time.Now()); err != nil {
 			return fmt.Errorf("signing request: %w", err)
 		}
 	}
@@ -162,9 +248,15 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 	}
 
 	if resp.StatusCode >= 400 {
+		// ZOA API structured error
 		var apiErr APIError
 		if json.Unmarshal(respBody, &apiErr) == nil && apiErr.Code != "" {
 			return &apiErr
+		}
+		// Lambda runtime error (Function URL returns this when Lambda crashes or returns an error)
+		var lambdaErr LambdaRuntimeError
+		if json.Unmarshal(respBody, &lambdaErr) == nil && lambdaErr.ErrorType != "" {
+			return &lambdaErr
 		}
 		body := string(respBody)
 		if len(body) > 512 {
@@ -173,6 +265,63 @@ func (c *Client) do(ctx context.Context, method, path string, body any, result a
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, body)
 	}
 
+	if result != nil {
+		if err := json.Unmarshal(respBody, result); err != nil {
+			return fmt.Errorf("decoding response: %w", err)
+		}
+	}
+	return nil
+}
+
+func (c *Client) doRoot(ctx context.Context, method, path string, body any, result any) error {
+	if c.timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, c.timeout)
+		defer cancel()
+	}
+
+	fullURL := c.baseURL + path
+
+	var bodyReader io.ReadSeeker
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return fmt.Errorf("marshaling request: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	} else {
+		bodyReader = bytes.NewReader(nil)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, fullURL, bodyReader)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+
+	if c.signer != nil {
+		creds, err := c.credentials.Retrieve(ctx)
+		if err != nil {
+			return fmt.Errorf("retrieving AWS credentials: %w", err)
+		}
+		payloadHash := sha256Hash(bodyReader)
+		if err := c.signer.SignHTTP(ctx, creds, req, payloadHash, c.sigService, c.region, time.Now()); err != nil {
+			return fmt.Errorf("signing request: %w", err)
+		}
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("executing request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(respBody))
+	}
 	if result != nil {
 		if err := json.Unmarshal(respBody, result); err != nil {
 			return fmt.Errorf("decoding response: %w", err)

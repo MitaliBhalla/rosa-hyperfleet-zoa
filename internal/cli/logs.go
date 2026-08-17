@@ -26,7 +26,7 @@ func newLogsCommand(global *GlobalOptions) *cobra.Command {
 }
 
 func showLogs(ctx context.Context, global *GlobalOptions, id string) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}

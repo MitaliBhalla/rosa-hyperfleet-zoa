@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 )
@@ -21,27 +23,43 @@ func (s staticCredentials) Retrieve(ctx context.Context) (aws.Credentials, error
 	}, nil
 }
 
-func TestExtractRegion(t *testing.T) {
+func TestParseEndpoint(t *testing.T) {
 	tests := []struct {
-		name    string
-		url     string
-		want    string
-		wantErr bool
+		name        string
+		url         string
+		wantRegion  string
+		wantService string
+		wantErr     bool
 	}{
 		{
-			name: "When URL has standard API Gateway format it should extract region",
-			url:  "https://abc123.execute-api.us-east-1.amazonaws.com/prod",
-			want: "us-east-1",
+			name:        "When URL is API Gateway it should extract region and use execute-api service",
+			url:         "https://abc123.execute-api.us-east-1.amazonaws.com/prod",
+			wantRegion:  "us-east-1",
+			wantService: "execute-api",
 		},
 		{
-			name: "When URL has eu-west-1 region it should extract correctly",
-			url:  "https://xyz789.execute-api.eu-west-1.amazonaws.com/prod",
-			want: "eu-west-1",
+			name:        "When URL is API Gateway in eu-west-1 it should extract correctly",
+			url:         "https://xyz789.execute-api.eu-west-1.amazonaws.com/prod",
+			wantRegion:  "eu-west-1",
+			wantService: "execute-api",
 		},
 		{
-			name:    "When URL has no execute-api segment it should return error",
-			url:     "https://example.com/api",
-			wantErr: true,
+			name:        "When URL is Lambda Function URL it should extract region and use lambda service",
+			url:         "https://mghe7tpfk3lhxtq66mp5td6epa0iugjm.lambda-url.us-east-1.on.aws/",
+			wantRegion:  "us-east-1",
+			wantService: "lambda",
+		},
+		{
+			name:        "When URL is Lambda Function URL in eu-central-1 it should extract correctly",
+			url:         "https://abcdef1234.lambda-url.eu-central-1.on.aws",
+			wantRegion:  "eu-central-1",
+			wantService: "lambda",
+		},
+		{
+			name:        "When URL is a custom CNAME it should return error for region auto-detection",
+			url:         "https://zoa.internal.example.com/api",
+			wantService: "lambda",
+			wantErr:     true,
 		},
 		{
 			name:    "When URL is invalid it should return error",
@@ -52,13 +70,16 @@ func TestExtractRegion(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := extractRegion(tt.url)
+			region, service, err := parseEndpoint(tt.url)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("extractRegion(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+				t.Errorf("parseEndpoint(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
 				return
 			}
-			if got != tt.want {
-				t.Errorf("extractRegion(%q) = %q, want %q", tt.url, got, tt.want)
+			if region != tt.wantRegion {
+				t.Errorf("parseEndpoint(%q) region = %q, want %q", tt.url, region, tt.wantRegion)
+			}
+			if service != tt.wantService {
+				t.Errorf("parseEndpoint(%q) service = %q, want %q", tt.url, service, tt.wantService)
 			}
 		})
 	}
@@ -91,8 +112,7 @@ func TestClientDispatch(t *testing.T) {
 		}
 
 		resp, err := c.Dispatch(context.Background(), "get_nodes", &DispatchRequest{
-			TargetCluster: "mc-useast1-1",
-			Jira:          "TEST-123",
+			Jira: "TEST-123",
 		})
 		if err != nil {
 			t.Fatalf("Dispatch() error = %v", err)
@@ -121,8 +141,7 @@ func TestClientDispatch(t *testing.T) {
 		}
 
 		_, err := c.Dispatch(context.Background(), "rollout_restart", &DispatchRequest{
-			TargetCluster: "mc-useast1-1",
-			Jira:          "TEST-123",
+			Jira: "TEST-123",
 		})
 		if err == nil {
 			t.Fatal("expected error, got nil")
@@ -173,4 +192,321 @@ func TestClientGetExecution(t *testing.T) {
 			t.Errorf("GetExecution().Output = %q, want %q", exec.Output, "node1 Ready\n")
 		}
 	})
+
+	t.Run("When include is empty it should not append query string", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.RawQuery != "" {
+				t.Errorf("expected no query string, got %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Execution{ID: "exec-no-include", Status: "dispatched"})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		exec, err := c.GetExecution(context.Background(), "exec-no-include", "")
+		if err != nil {
+			t.Fatalf("GetExecution() error = %v", err)
+		}
+		if exec.Status != "dispatched" {
+			t.Errorf("expected status dispatched, got %q", exec.Status)
+		}
+	})
+}
+
+func TestClientListExecutions(t *testing.T) {
+	t.Run("When query params provided it should pass them", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v0/trusted-actions/runs" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.URL.Query().Get("status") != "failed" {
+				t.Errorf("expected status=failed, got %q", r.URL.Query().Get("status"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ExecutionList{Items: []Execution{{ID: "e1", Status: "failed"}}})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		q := make(map[string][]string)
+		q["status"] = []string{"failed"}
+		list, err := c.ListExecutions(context.Background(), q)
+		if err != nil {
+			t.Fatalf("ListExecutions() error = %v", err)
+		}
+		if len(list.Items) != 1 {
+			t.Errorf("expected 1 item, got %d", len(list.Items))
+		}
+	})
+}
+
+func TestClientGetAction(t *testing.T) {
+	t.Run("When action exists it should return it", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v0/trusted-actions/get_pods" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(Action{Name: "get_pods", Scope: "kube-api", Type: "read"})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		action, err := c.GetAction(context.Background(), "get_pods")
+		if err != nil {
+			t.Fatalf("GetAction() error = %v", err)
+		}
+		if action.Name != "get_pods" {
+			t.Errorf("expected name 'get_pods', got %q", action.Name)
+		}
+	})
+}
+
+func TestClientListActions(t *testing.T) {
+	t.Run("When actions exist it should return list", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v0/trusted-actions" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ActionList{Items: []Action{
+				{Name: "get_pods"}, {Name: "rollout_restart"},
+			}})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		list, err := c.ListActions(context.Background())
+		if err != nil {
+			t.Fatalf("ListActions() error = %v", err)
+		}
+		if len(list.Items) != 2 {
+			t.Errorf("expected 2 actions, got %d", len(list.Items))
+		}
+	})
+}
+
+func TestClientListAudit(t *testing.T) {
+	t.Run("When query params provided it should pass them", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v0/trusted-actions/audit" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			if r.URL.Query().Get("since") != "24h" {
+				t.Errorf("expected since=24h, got %q", r.URL.Query().Get("since"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(AuditList{Items: []AuditEntry{{Method: "POST", StatusCode: 200}}})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		q := make(map[string][]string)
+		q["since"] = []string{"24h"}
+		list, err := c.ListAudit(context.Background(), q)
+		if err != nil {
+			t.Fatalf("ListAudit() error = %v", err)
+		}
+		if len(list.Items) != 1 {
+			t.Errorf("expected 1 entry, got %d", len(list.Items))
+		}
+	})
+}
+
+func TestClientServerVersion(t *testing.T) {
+	t.Run("When server responds it should parse version info", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/version" {
+				t.Errorf("expected path '/version', got %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(ServerVersionInfo{
+				Version: "0.5.0", GitCommit: "abc123", GoVersion: "go1.22", Platform: "linux/amd64", Target: "eph-test-rc",
+			})
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		info, err := c.ServerVersion(context.Background())
+		if err != nil {
+			t.Fatalf("ServerVersion() error = %v", err)
+		}
+		if info.Version != "0.5.0" {
+			t.Errorf("expected version '0.5.0', got %q", info.Version)
+		}
+		if info.Target != "eph-test-rc" {
+			t.Errorf("expected target 'eph-test-rc', got %q", info.Target)
+		}
+	})
+}
+
+func TestClientRawGet(t *testing.T) {
+	t.Run("When server responds it should return raw response", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != "/api/v0/trusted-actions/runs/exec-1/output" {
+				t.Errorf("unexpected path: %s", r.URL.Path)
+			}
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte(`{"data":"raw content"}`))
+		}))
+		defer server.Close()
+
+		c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+		resp, err := c.RawGet(context.Background(), "/trusted-actions/runs/exec-1/output")
+		if err != nil {
+			t.Fatalf("RawGet() error = %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+}
+
+func TestClientDo_WhenLambdaRuntimeError_ItShouldReturnLambdaError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+		w.Write([]byte(`{"errorMessage":"exit status 1","errorType":"Runtime.ExitError"}`))
+	}))
+	defer server.Close()
+
+	c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+	_, err := c.ListActions(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	lambdaErr, ok := err.(*LambdaRuntimeError)
+	if !ok {
+		t.Fatalf("expected *LambdaRuntimeError, got %T: %v", err, err)
+	}
+	if lambdaErr.ErrorType != "Runtime.ExitError" {
+		t.Errorf("expected Runtime.ExitError, got %q", lambdaErr.ErrorType)
+	}
+}
+
+func TestClientDo_WhenGenericHTTPError_ItShouldReturnFormattedError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		w.Write([]byte("Bad Gateway"))
+	}))
+	defer server.Close()
+
+	c := &Client{baseURL: server.URL, region: "us-east-1", credentials: staticCredentials{}, httpClient: http.DefaultClient}
+	_, err := c.ListActions(context.Background())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if _, ok := err.(*APIError); ok {
+		t.Error("should NOT be APIError for plain text response")
+	}
+}
+
+func TestClientWithTimeout(t *testing.T) {
+	c := &Client{baseURL: "https://test.lambda-url.us-east-1.on.aws", timeout: 30 * time.Second}
+	c2 := c.WithTimeout(5 * time.Second)
+	if c2.timeout != 5*time.Second {
+		t.Errorf("expected 5s timeout, got %v", c2.timeout)
+	}
+	if c.timeout != 30*time.Second {
+		t.Error("original client should not be modified")
+	}
+}
+
+func TestClientNew(t *testing.T) {
+	t.Run("When valid Lambda URL it should succeed", func(t *testing.T) {
+		c, err := New("https://abc.lambda-url.us-east-1.on.aws", staticCredentials{}, Options{
+			AccountID: "123456",
+			Operator:  "arn:aws:iam::123456:user/test",
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.region != "us-east-1" {
+			t.Errorf("expected region us-east-1, got %q", c.region)
+		}
+		if c.accountID != "123456" {
+			t.Errorf("expected accountID '123456', got %q", c.accountID)
+		}
+	})
+
+	t.Run("When custom CNAME without region option it should fail", func(t *testing.T) {
+		_, err := New("https://zoa.internal.example.com", staticCredentials{}, Options{})
+		if err == nil {
+			t.Fatal("expected error for custom CNAME without region")
+		}
+	})
+
+	t.Run("When custom CNAME with region option it should succeed", func(t *testing.T) {
+		c, err := New("https://zoa.internal.example.com", staticCredentials{}, Options{Region: "eu-west-1"})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if c.region != "eu-west-1" {
+			t.Errorf("expected region eu-west-1, got %q", c.region)
+		}
+	})
+}
+
+func TestClientDo_WhenHeadersSet_ItShouldSendAccountAndOperator(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Account-ID") != "999888" {
+			t.Errorf("expected X-Account-ID=999888, got %q", r.Header.Get("X-Account-ID"))
+		}
+		if r.Header.Get("X-Operator") != "arn:aws:iam::999888:user/sre" {
+			t.Errorf("expected X-Operator header, got %q", r.Header.Get("X-Operator"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(ActionList{Items: []Action{}})
+	}))
+	defer server.Close()
+
+	c := &Client{
+		baseURL:     server.URL,
+		region:      "us-east-1",
+		credentials: staticCredentials{},
+		httpClient:  http.DefaultClient,
+		accountID:   "999888",
+		operator:    "arn:aws:iam::999888:user/sre",
+	}
+	_, err := c.ListActions(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- sha256Hash tests ---
+
+func TestSha256Hash_WhenValidInput_ItShouldReturnCorrectHash(t *testing.T) {
+	input := strings.NewReader(`{"action":"test"}`)
+	hash := sha256Hash(input)
+	if len(hash) != 64 {
+		t.Errorf("expected 64-char hex string, got len=%d: %q", len(hash), hash)
+	}
+
+	// After hashing, reader should be reset to start
+	buf := make([]byte, 20)
+	n, _ := input.Read(buf)
+	if string(buf[:n]) != `{"action":"test"}` {
+		t.Errorf("reader was not reset after hashing")
+	}
+}
+
+func TestSha256Hash_WhenEmptyInput_ItShouldReturnEmptySha(t *testing.T) {
+	input := strings.NewReader("")
+	hash := sha256Hash(input)
+	// SHA-256 of empty string
+	expected := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if hash != expected {
+		t.Errorf("sha256('') = %q, want %q", hash, expected)
+	}
+}
+
+func TestSha256Hash_WhenCalledTwice_ItShouldProduceSameResult(t *testing.T) {
+	input := strings.NewReader("deterministic content")
+	h1 := sha256Hash(input)
+	h2 := sha256Hash(input)
+	if h1 != h2 {
+		t.Errorf("sha256Hash not deterministic: %q != %q", h1, h2)
+	}
 }
