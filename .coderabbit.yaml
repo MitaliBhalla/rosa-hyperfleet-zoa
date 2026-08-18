@@ -16,15 +16,27 @@ reviews:
       instructions: |
         Review internal packages for Go best practices, proper error wrapping,
         and clean separation of concerns between CLI commands and service logic.
-    - path: "trusted-actions/**"
+    - path: "pkg/actions/**"
       instructions: |
-        Review Trusted Action definitions for security: verify RBAC follows
-        least-privilege, scripts don't access secrets in clusters-* namespaces,
-        params are properly validated, and timeout_seconds is reasonable.
-    - path: "image/**"
+        Review Trusted Action implementations for security: verify RBAC follows
+        least-privilege, params are properly validated, timeout_seconds is
+        reasonable, and the conformance test would pass (metadata, naming, RBAC).
+    - path: "pkg/api/**"
       instructions: |
-        Review entrypoint scripts for proper error handling, output size
-        validation, and no sensitive data leakage in logs.
+        Review API handlers for proper authentication, input validation,
+        correct HTTP status codes, and no sensitive data leakage in responses.
+    - path: "pkg/executor/**"
+      instructions: |
+        Review executor code for proper RBAC scoping, safe cleanup of ephemeral
+        resources, no privilege escalation, and correct STS session policies.
+    - path: "pkg/store/**"
+      instructions: |
+        Review DynamoDB operations for proper error handling, atomic transitions,
+        and no sensitive data stored in plain text.
+    - path: "pkg/scheduler/**"
+      instructions: |
+        Review reconciler and GC logic for idempotency, safe state transitions,
+        and proper handling of edge cases (orphaned jobs, stale records).
     - path: "Containerfile*"
       instructions: |
         Review container images for minimal base images, no unnecessary tools,
