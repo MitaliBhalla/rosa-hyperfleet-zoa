@@ -411,9 +411,9 @@ func TestHandleAudit_WhenCalled_ItShouldRecordAudit(t *testing.T) {
 
 func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 	cases := []struct {
-		input    string
-		minAgo   int64
-		maxAgo   int64
+		input  string
+		minAgo int64
+		maxAgo int64
 	}{
 		{"1h", 3500, 3700},
 		{"24h", 86300, 86500},

@@ -34,7 +34,7 @@ var forbiddenRules = []ForbiddenRBACRule{
 		Reason:    "wildcard resources with wildcard verbs is forbidden",
 	},
 	{
-		Verbs: []string{"*"},
+		Verbs:  []string{"*"},
 		Reason: "wildcard verbs are forbidden; declare explicit verbs",
 	},
 }

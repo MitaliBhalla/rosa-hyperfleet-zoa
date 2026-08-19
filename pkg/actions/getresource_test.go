@@ -37,7 +37,7 @@ func getresourceTestLogger() *slog.Logger {
 }
 
 func newFakeKubeClient() *fake.Clientset {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	client.Resources = []*metav1.APIResourceList{
 		{
 			GroupVersion: "v1",
@@ -76,26 +76,6 @@ func fakePod(ns, name, phase string) *unstructured.Unstructured {
 			},
 			"status": map[string]interface{}{
 				"phase": phase,
-			},
-		},
-	}
-}
-
-func fakeDeployment(ns, name string, replicas, ready int64) *unstructured.Unstructured {
-	return &unstructured.Unstructured{
-		Object: map[string]interface{}{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": ns,
-			},
-			"spec": map[string]interface{}{
-				"replicas": replicas,
-			},
-			"status": map[string]interface{}{
-				"readyReplicas":     ready,
-				"availableReplicas": ready,
 			},
 		},
 	}
@@ -385,7 +365,7 @@ func TestGetResourceRegistry(t *testing.T) {
 
 func TestDiscoverGVR(t *testing.T) {
 	t.Run("When discovery includes subresources it should skip them", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 		client.Resources = []*metav1.APIResourceList{
 			{
 				GroupVersion: "v1",
@@ -410,7 +390,7 @@ func TestDiscoverGVR(t *testing.T) {
 	})
 
 	t.Run("When input is plural it should match correctly", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 		client.Resources = []*metav1.APIResourceList{
 			{
 				GroupVersion: "v1",
@@ -430,7 +410,7 @@ func TestDiscoverGVR(t *testing.T) {
 	})
 
 	t.Run("When input is short name it should match", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 		client.Resources = []*metav1.APIResourceList{
 			{
 				GroupVersion: "v1",
@@ -450,7 +430,7 @@ func TestDiscoverGVR(t *testing.T) {
 	})
 
 	t.Run("When same resource exists in core and extension groups it should prefer core", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 		client.Resources = []*metav1.APIResourceList{
 			{
 				GroupVersion: "metrics.k8s.io/v1beta1",
@@ -479,7 +459,7 @@ func TestDiscoverGVR(t *testing.T) {
 	})
 
 	t.Run("When resource is not found it should return error", func(t *testing.T) {
-		client := fake.NewSimpleClientset()
+		client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 		client.Resources = []*metav1.APIResourceList{
 			{
 				GroupVersion: "v1",

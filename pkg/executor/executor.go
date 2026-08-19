@@ -371,8 +371,8 @@ func (e *Executor) DispatchAsync(ctx context.Context, exec *store.Execution, act
 					RestartPolicy:      corev1.RestartPolicyNever,
 					Containers: []corev1.Container{
 						{
-							Name:  "runner",
-							Image: e.jobImage,
+							Name:    "runner",
+							Image:   e.jobImage,
 							Command: []string{"/usr/local/bin/zoa-runner"},
 							Env: []corev1.EnvVar{
 								{Name: "EXECUTION_ID", Value: exec.ID},
@@ -514,7 +514,7 @@ func (e *Executor) buildAWSParams(ctx context.Context, executionID string, param
 		Credentials: aws.CredentialsProviderFunc(func(ctx context.Context) (aws.Credentials, error) {
 			return aws.Credentials{
 				AccessKeyID:     *assumeOut.Credentials.AccessKeyId,
-				SecretAccessKey:  *assumeOut.Credentials.SecretAccessKey,
+				SecretAccessKey: *assumeOut.Credentials.SecretAccessKey,
 				SessionToken:    *assumeOut.Credentials.SessionToken,
 				Source:          "zoa-sts-assume-role",
 			}, nil

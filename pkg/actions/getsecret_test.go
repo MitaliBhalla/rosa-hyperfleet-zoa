@@ -94,7 +94,7 @@ func TestGetSecret(t *testing.T) {
 	})
 
 	t.Run("When fetching a specific secret it should return keys only by default", func(t *testing.T) {
-		client := fake.NewSimpleClientset(&corev1.Secret{
+		client := fake.NewSimpleClientset(&corev1.Secret{ //nolint:staticcheck // NewClientset requires generated apply configs
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "tls-cert",
 				Namespace: "cert-manager",
@@ -137,7 +137,7 @@ func TestGetSecret(t *testing.T) {
 	})
 
 	t.Run("When verbose is true it should return base64 data values", func(t *testing.T) {
-		client := fake.NewSimpleClientset(&corev1.Secret{
+		client := fake.NewSimpleClientset(&corev1.Secret{ //nolint:staticcheck // NewClientset requires generated apply configs
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "my-secret",
 				Namespace: "default",
@@ -172,7 +172,7 @@ func TestGetSecret(t *testing.T) {
 	})
 
 	t.Run("When listing secrets it should filter blocked names", func(t *testing.T) {
-		client := fake.NewSimpleClientset(
+		client := fake.NewSimpleClientset( //nolint:staticcheck // NewClientset requires generated apply configs
 			&corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: "myapp"},
 				Data:       map[string][]byte{"key": []byte("val")},
@@ -214,7 +214,7 @@ func TestGetSecret(t *testing.T) {
 	})
 
 	t.Run("When fetching secret with kubeconfig in name via Execute it should reject", func(t *testing.T) {
-		client := fake.NewSimpleClientset(&corev1.Secret{
+		client := fake.NewSimpleClientset(&corev1.Secret{ //nolint:staticcheck // NewClientset requires generated apply configs
 			ObjectMeta: metav1.ObjectMeta{Name: "admin-kubeconfig", Namespace: "default"},
 			Data:       map[string][]byte{"config": []byte("data")},
 		})

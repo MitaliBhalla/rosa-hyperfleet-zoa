@@ -100,7 +100,7 @@ func (r *Reconciler) orphanGC(ctx context.Context) error {
 		if i >= r.cfg.MaxBatchPerTick || ctx.Err() != nil {
 			break
 		}
-		if job.CreationTimestamp.Time.After(time.Now().Add(-orphanAge)) {
+		if job.CreationTimestamp.After(time.Now().Add(-orphanAge)) {
 			continue
 		}
 

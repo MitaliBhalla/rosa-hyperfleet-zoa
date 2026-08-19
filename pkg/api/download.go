@@ -75,5 +75,5 @@ func (h *Handler) handleDownloadOutput(w http.ResponseWriter, r *http.Request, i
 	w.Header().Set("X-Execution-Status", string(exec.Status))
 	w.WriteHeader(http.StatusOK)
 
-	io.Copy(w, out.Body)
+	_, _ = io.Copy(w, out.Body)
 }

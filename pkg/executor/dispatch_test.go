@@ -43,7 +43,7 @@ func newTestExecutor(client *fake.Clientset, stsClient STSAssumeRoler) *Executor
 }
 
 func TestDispatchAsync_WhenCalled_ItShouldCreateSTSScopedSecret(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -52,9 +52,9 @@ func TestDispatchAsync_WhenCalled_ItShouldCreateSTSScopedSecret(t *testing.T) {
 	mockSTS := &mockSTSClient{ // notsecret — fake STS credentials for unit tests
 		output: &sts.AssumeRoleOutput{
 			Credentials: &ststypes.Credentials{
-				AccessKeyId:     aws.String("AKIAEXAMPLE"),      // notsecret
-				SecretAccessKey: aws.String("secret123"),         // notsecret
-				SessionToken:    aws.String("token456"),          // notsecret
+				AccessKeyId:     aws.String("AKIAEXAMPLE"), // notsecret
+				SecretAccessKey: aws.String("secret123"),   // notsecret
+				SessionToken:    aws.String("token456"),    // notsecret
 			},
 		},
 	}
@@ -127,7 +127,7 @@ func TestDispatchAsync_WhenCalled_ItShouldCreateSTSScopedSecret(t *testing.T) {
 }
 
 func TestDispatchAsync_WhenCalled_ItShouldCreateJobWithSecretEnvFrom(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -238,7 +238,7 @@ func TestDispatchAsync_WhenCalled_ItShouldCreateJobWithSecretEnvFrom(t *testing.
 }
 
 func TestDispatchAsync_WhenSTSFails_ItShouldCleanupAndReturnError(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -282,7 +282,7 @@ func TestDispatchAsync_WhenSTSFails_ItShouldCleanupAndReturnError(t *testing.T) 
 }
 
 func TestDispatchAsync_WhenSessionPolicy_ItShouldScopeToExecutionPrefix(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -317,7 +317,7 @@ func TestDispatchAsync_WhenSessionPolicy_ItShouldScopeToExecutionPrefix(t *testi
 }
 
 func TestDispatchAsync_WhenKubeAPIScope_ItShouldIncludeKMSInSessionPolicy(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -370,7 +370,7 @@ func TestDispatchAsync_WhenKubeAPIScope_ItShouldIncludeKMSInSessionPolicy(t *tes
 }
 
 func TestDispatchAsync_WhenAWSAPIScope_ItShouldNotIncludeSessionPolicy(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -423,7 +423,7 @@ func TestDispatchAsync_WhenAWSAPIScope_ItShouldNotIncludeSessionPolicy(t *testin
 }
 
 func TestDispatchAsync_WhenAWSAPIWriteScope_ItShouldUseWriteRole(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -470,7 +470,7 @@ func TestDispatchAsync_WhenAWSAPIWriteScope_ItShouldUseWriteRole(t *testing.T) {
 }
 
 func TestDispatchAsync_WhenAWSAPIScope_ItShouldSkipKubeRBAC(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -531,7 +531,7 @@ func TestDispatchAsync_WhenAWSAPIScope_ItShouldSkipKubeRBAC(t *testing.T) {
 }
 
 func TestCleanupResources_WhenAsyncExecution_ItShouldDeleteCredentialsSecret(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: jobNamespace}}
@@ -569,7 +569,7 @@ func TestCleanupResources_WhenAsyncExecution_ItShouldDeleteCredentialsSecret(t *
 }
 
 func TestClientForServiceAccount_WhenCalled_ItShouldReturnImpersonatingClient(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{
 		kubeClient: client,
 		restConfig: &rest.Config{Host: "https://localhost:6443"},

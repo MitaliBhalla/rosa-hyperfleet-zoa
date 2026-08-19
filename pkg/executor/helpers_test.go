@@ -149,9 +149,9 @@ func TestBuildAWSParams_WhenReadAction_ItShouldUseReadRole(t *testing.T) {
 	mock := &mockSTS{ // notsecret — fake STS credentials for unit tests
 		output: &sts.AssumeRoleOutput{
 			Credentials: &ststypes.Credentials{
-				AccessKeyId:     aws.String("AKIA..."),  // notsecret
-				SecretAccessKey:  aws.String("secret"),  // notsecret
-				SessionToken:    aws.String("token"),    // notsecret
+				AccessKeyId:     aws.String("AKIA..."), // notsecret
+				SecretAccessKey: aws.String("secret"),  // notsecret
+				SessionToken:    aws.String("token"),   // notsecret
 			},
 		},
 	}
@@ -179,9 +179,9 @@ func TestBuildAWSParams_WhenWriteAction_ItShouldUseWriteRole(t *testing.T) {
 	mock := &mockSTS{ // notsecret — fake STS credentials for unit tests
 		output: &sts.AssumeRoleOutput{
 			Credentials: &ststypes.Credentials{
-				AccessKeyId:     aws.String("AKIA..."),  // notsecret
-				SecretAccessKey:  aws.String("secret"),  // notsecret
-				SessionToken:    aws.String("token"),    // notsecret
+				AccessKeyId:     aws.String("AKIA..."), // notsecret
+				SecretAccessKey: aws.String("secret"),  // notsecret
+				SessionToken:    aws.String("token"),   // notsecret
 			},
 		},
 	}

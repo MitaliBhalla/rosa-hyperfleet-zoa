@@ -273,8 +273,8 @@ func (l *Lambda) runDispatchedExecution(ctx context.Context, executionID string)
 	if !ok {
 		_ = l.execStore.TransitionWithMetadata(ctx, executionID, store.StatusDispatched, store.StatusFailed,
 			map[string]interface{}{
-				"completedAt":     time.Now().Format(time.RFC3339Nano),
-				"durationMs": int64(0),
+				"completedAt": time.Now().Format(time.RFC3339Nano),
+				"durationMs":  int64(0),
 			})
 		return fmt.Errorf("action %q not registered", exec.Action)
 	}

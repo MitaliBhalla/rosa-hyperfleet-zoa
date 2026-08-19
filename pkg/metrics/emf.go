@@ -14,13 +14,8 @@ type MetricDefinition struct {
 	Unit string `json:"Unit"`
 }
 
-type emfLog struct {
-	AWS        emfMetadata            `json:"_aws"`
-	Properties map[string]interface{} `json:"-"`
-}
-
 type emfMetadata struct {
-	Timestamp     int64              `json:"Timestamp"`
+	Timestamp         int64                `json:"Timestamp"`
 	CloudWatchMetrics []emfMetricDirective `json:"CloudWatchMetrics"`
 }
 

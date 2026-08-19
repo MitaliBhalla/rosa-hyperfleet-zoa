@@ -23,24 +23,24 @@ type Execution struct {
 	Action          string            `json:"action" dynamodbav:"action"`
 	RequestedAction string            `json:"requested_action,omitempty" dynamodbav:"requestedAction,omitempty"`
 	AccountID       string            `json:"account_id" dynamodbav:"accountId"`
-	TargetCluster  string            `json:"target_cluster" dynamodbav:"targetCluster"`
-	Operator       string            `json:"operator" dynamodbav:"operator"`
-	Status         Status            `json:"status" dynamodbav:"status"`
-	ExecutionMode  string            `json:"execution_mode" dynamodbav:"executionMode"`
-	Scope          string            `json:"scope" dynamodbav:"scope"`
-	Type           string            `json:"type" dynamodbav:"type"`
-	DryRun         bool              `json:"dry_run" dynamodbav:"dryRun"`
-	Force          bool              `json:"force" dynamodbav:"force"`
-	Params         map[string]string `json:"params,omitempty" dynamodbav:"params,omitempty"`
-	Jira           string            `json:"jira,omitempty" dynamodbav:"jira,omitempty"`
+	TargetCluster   string            `json:"target_cluster" dynamodbav:"targetCluster"`
+	Operator        string            `json:"operator" dynamodbav:"operator"`
+	Status          Status            `json:"status" dynamodbav:"status"`
+	ExecutionMode   string            `json:"execution_mode" dynamodbav:"executionMode"`
+	Scope           string            `json:"scope" dynamodbav:"scope"`
+	Type            string            `json:"type" dynamodbav:"type"`
+	DryRun          bool              `json:"dry_run" dynamodbav:"dryRun"`
+	Force           bool              `json:"force" dynamodbav:"force"`
+	Params          map[string]string `json:"params,omitempty" dynamodbav:"params,omitempty"`
+	Jira            string            `json:"jira,omitempty" dynamodbav:"jira,omitempty"`
 
 	Revision string `json:"revision,omitempty" dynamodbav:"revision,omitempty"`
 
-	TimeoutSeconds  int    `json:"timeout_seconds" dynamodbav:"timeoutSeconds"`
-	CreatedAt       string `json:"created_at" dynamodbav:"createdAt"`
-	DispatchedAt    string `json:"dispatched_at,omitempty" dynamodbav:"dispatchedAt,omitempty"`
-	CompletedAt     string `json:"completed_at,omitempty" dynamodbav:"completedAt,omitempty"`
-	DurationMs int64 `json:"duration_ms,omitempty" dynamodbav:"durationMs,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds" dynamodbav:"timeoutSeconds"`
+	CreatedAt      string `json:"created_at" dynamodbav:"createdAt"`
+	DispatchedAt   string `json:"dispatched_at,omitempty" dynamodbav:"dispatchedAt,omitempty"`
+	CompletedAt    string `json:"completed_at,omitempty" dynamodbav:"completedAt,omitempty"`
+	DurationMs     int64  `json:"duration_ms,omitempty" dynamodbav:"durationMs,omitempty"`
 
 	Cleaned   bool   `json:"cleaned" dynamodbav:"cleaned"`
 	CleanedAt string `json:"cleaned_at,omitempty" dynamodbav:"cleanedAt,omitempty"`

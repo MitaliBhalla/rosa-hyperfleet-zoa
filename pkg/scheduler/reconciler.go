@@ -256,7 +256,6 @@ func (r *Reconciler) timeoutDispatched(ctx context.Context) error {
 	return nil
 }
 
-
 func (r *Reconciler) pollAsyncJobs(ctx context.Context) error {
 	allDispatched, err := r.executionStore.QueryByTargetAndStatus(ctx, r.cfg.TargetCluster, store.StatusDispatched)
 	if err != nil {
@@ -323,7 +322,6 @@ func (r *Reconciler) pollAsyncJobs(ctx context.Context) error {
 	}
 	return nil
 }
-
 
 func jobStatus(job *batchv1.Job) store.Status {
 	for _, c := range job.Status.Conditions {

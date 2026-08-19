@@ -22,18 +22,18 @@ type Action interface {
 type Params = map[string]string
 
 type ActionMetadata struct {
-	Name                 string             `json:"name"`
-	Scope                string             `json:"scope"`
-	Type                 string             `json:"type"`
-	ExecutionMode        string             `json:"execution_mode"`
-	Description          string             `json:"description"`
-	Parameters           []ParameterDef     `json:"parameters"`
+	Name                 string              `json:"name"`
+	Scope                string              `json:"scope"`
+	Type                 string              `json:"type"`
+	ExecutionMode        string              `json:"execution_mode"`
+	Description          string              `json:"description"`
+	Parameters           []ParameterDef      `json:"parameters"`
 	Authorization        AuthorizationConfig `json:"authorization"`
-	TimeoutSeconds       int                `json:"timeout_seconds"`
-	WriteCooldownSeconds int                `json:"write_cooldown_seconds"`
-	DryRunAction         string             `json:"dry_run_action,omitempty"`
-	DryRunExtraParams    Params             `json:"dry_run_extra_params,omitempty"`
-	RBAC                 *RBACConfig        `json:"rbac,omitempty"`
+	TimeoutSeconds       int                 `json:"timeout_seconds"`
+	WriteCooldownSeconds int                 `json:"write_cooldown_seconds"`
+	DryRunAction         string              `json:"dry_run_action,omitempty"`
+	DryRunExtraParams    Params              `json:"dry_run_extra_params,omitempty"`
+	RBAC                 *RBACConfig         `json:"rbac,omitempty"`
 }
 
 type AuthorizationConfig struct {

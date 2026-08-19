@@ -13,7 +13,7 @@ import (
 )
 
 func TestEnsureNamespace_WhenNamespaceDoesNotExist_ItShouldCreateIt(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -32,7 +32,7 @@ func TestEnsureNamespace_WhenNamespaceDoesNotExist_ItShouldCreateIt(t *testing.T
 }
 
 func TestEnsureNamespace_WhenNamespaceAlreadyExists_ItShouldSucceed(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -46,7 +46,7 @@ func TestEnsureNamespace_WhenNamespaceAlreadyExists_ItShouldSucceed(t *testing.T
 }
 
 func TestEnsureNamespace_WhenCalledTwice_ItShouldBeIdempotent(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -59,7 +59,7 @@ func TestEnsureNamespace_WhenCalledTwice_ItShouldBeIdempotent(t *testing.T) {
 }
 
 func TestCreateResourcesIdempotent_WhenClusterScoped_ItShouldCreateClusterRoleAndBinding(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -104,7 +104,7 @@ func TestCreateResourcesIdempotent_WhenClusterScoped_ItShouldCreateClusterRoleAn
 }
 
 func TestCreateResourcesIdempotent_WhenNamespaceScoped_ItShouldCreateRoleAndBinding(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -135,7 +135,7 @@ func TestCreateResourcesIdempotent_WhenNamespaceScoped_ItShouldCreateRoleAndBind
 }
 
 func TestCleanupResources_WhenClusterScoped_ItShouldDeleteAllResources(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -172,7 +172,7 @@ func TestCleanupResources_WhenClusterScoped_ItShouldDeleteAllResources(t *testin
 }
 
 func TestCleanupResources_WhenResourcesDoNotExist_ItShouldNotError(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -181,7 +181,7 @@ func TestCleanupResources_WhenResourcesDoNotExist_ItShouldNotError(t *testing.T)
 }
 
 func TestCreateResourcesIdempotent_WhenNilRBAC_ItShouldOnlyCreateServiceAccount(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 
@@ -200,7 +200,7 @@ func TestCreateResourcesIdempotent_WhenNilRBAC_ItShouldOnlyCreateServiceAccount(
 }
 
 func TestCreateResourcesIdempotent_WhenCalledTwice_ItShouldBeIdempotent(t *testing.T) {
-	client := fake.NewSimpleClientset()
+	client := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	e := &Executor{kubeClient: client, logger: noopLogger()}
 	ctx := context.Background()
 

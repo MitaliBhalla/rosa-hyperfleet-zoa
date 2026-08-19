@@ -44,9 +44,9 @@ func (m *mockS3) GetObject(_ context.Context, params *s3.GetObjectInput, _ ...fu
 }
 
 type mockExecStore struct {
-	executions   []*store.Execution
-	created      []*store.Execution
-	activeCount  int
+	executions     []*store.Execution
+	created        []*store.Execution
+	activeCount    int
 	recentByTarget []*store.Execution
 }
 
@@ -105,11 +105,11 @@ func init() {
 	// Register test actions
 	actions.Register(&testAction{
 		meta: actions.ActionMetadata{
-			Name:               "test-read",
-			Scope:              "kube-api",
-			Type:               "read",
-			ExecutionMode:     "sync",
-			TimeoutSeconds:     60,
+			Name:           "test-read",
+			Scope:          "kube-api",
+			Type:           "read",
+			ExecutionMode:  "sync",
+			TimeoutSeconds: 60,
 			Parameters: []actions.ParameterDef{
 				{Name: "namespace", Required: true},
 			},
@@ -120,7 +120,7 @@ func init() {
 			Name:                 "test-write",
 			Scope:                "kube-api",
 			Type:                 "write",
-			ExecutionMode:       "sync",
+			ExecutionMode:        "sync",
 			TimeoutSeconds:       60,
 			WriteCooldownSeconds: 300,
 			Parameters: []actions.ParameterDef{
@@ -134,7 +134,7 @@ func init() {
 			Name:           "test-write-dryrun",
 			Scope:          "kube-api",
 			Type:           "read",
-			ExecutionMode: "sync",
+			ExecutionMode:  "sync",
 			TimeoutSeconds: 60,
 			DryRunAction:   "test-read",
 			Parameters: []actions.ParameterDef{
@@ -149,7 +149,7 @@ type testAction struct {
 	meta actions.ActionMetadata
 }
 
-func (t *testAction) Metadata() actions.ActionMetadata { return t.meta }
+func (t *testAction) Metadata() actions.ActionMetadata                             { return t.meta }
 func (t *testAction) Validate(_ context.Context, _ *actions.ExecutionParams) error { return nil }
 func (t *testAction) Execute(_ context.Context, _ *actions.ExecutionParams) (*actions.ActionResult, error) {
 	return &actions.ActionResult{Success: true}, nil
@@ -194,14 +194,14 @@ func testHandlerWithCustomAudit(execStore store.ExecutionStore, auditStore store
 
 func testHandlerWithS3(execStore store.ExecutionStore, s3Mock S3Getter) *Handler {
 	cfg := &config.Config{
-		HandlerMode:               "api",
-		ArtifactBucket:            "test-bucket",
-		WriteCooldownSeconds:      300,
-		MaxConcurrentPerTarget:    5,
-		TargetCluster:             "test-cluster",
-		UploaderRoleARN:           "arn:aws:iam::123:role/uploader",
-		JobImage:                  "test:latest",
-		ExecutionDeadlineSeconds:  295,
+		HandlerMode:              "api",
+		ArtifactBucket:           "test-bucket",
+		WriteCooldownSeconds:     300,
+		MaxConcurrentPerTarget:   5,
+		TargetCluster:            "test-cluster",
+		UploaderRoleARN:          "arn:aws:iam::123:role/uploader",
+		JobImage:                 "test:latest",
+		ExecutionDeadlineSeconds: 295,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	exec := executor.New(nil, nil, nil, nil, executor.ExecutorConfig{
@@ -406,9 +406,9 @@ func TestHandleCreate_WhenDryRun_ItShouldUseDryRunAction(t *testing.T) {
 	h := testHandler(execStore)
 
 	body := createRequest{
-		Jira:           "JIRA-123",
-		Params:         map[string]string{"namespace": "default", "name": "pod-1"},
-		DryRun:         true,
+		Jira:          "JIRA-123",
+		Params:        map[string]string{"namespace": "default", "name": "pod-1"},
+		DryRun:        true,
 		ExecutionMode: "async", // avoid needing real executor
 	}
 
@@ -522,8 +522,8 @@ func TestHandleCreate_WhenInvalidExecutionMode_ItShouldReturn400(t *testing.T) {
 	h := testHandler(execStore)
 
 	body := createRequest{
-		Jira:           "JIRA-123",
-		Params:         map[string]string{"namespace": "default"},
+		Jira:          "JIRA-123",
+		Params:        map[string]string{"namespace": "default"},
 		ExecutionMode: "invalid",
 	}
 
@@ -545,8 +545,8 @@ func TestHandleCreate_WhenAsyncOverride_ItShouldSetExecutionModeAsync(t *testing
 	h := testHandler(execStore)
 
 	body := createRequest{
-		Jira:           "JIRA-123",
-		Params:         map[string]string{"namespace": "default"},
+		Jira:          "JIRA-123",
+		Params:        map[string]string{"namespace": "default"},
 		ExecutionMode: "async",
 	}
 
@@ -612,11 +612,11 @@ func TestHandleGetExecution_WhenIncludeOutput_ItShouldEmbedS3Content(t *testing.
 	execStore := &mockExecStore{
 		executions: []*store.Execution{
 			{
-				ID:              "exec-001",
-				Action:          "get_resource",
-				Status:          store.StatusSucceeded,
-				DurationMs: 2000,
-				OutputBytes:     42,
+				ID:          "exec-001",
+				Action:      "get_resource",
+				Status:      store.StatusSucceeded,
+				DurationMs:  2000,
+				OutputBytes: 42,
 			},
 		},
 	}
@@ -757,9 +757,9 @@ func TestHandleGetExecution_WhenTerminal_ItShouldIncludeDuration(t *testing.T) {
 	execStore := &mockExecStore{
 		executions: []*store.Execution{
 			{
-				ID:              "exec-005",
-				Action:          "get_resource",
-				Status:          store.StatusSucceeded,
+				ID:         "exec-005",
+				Action:     "get_resource",
+				Status:     store.StatusSucceeded,
 				DurationMs: 258, // sub-second execution
 			},
 		},
@@ -867,7 +867,7 @@ func testHandlerWithWorkingExecutor(execStore store.ExecutionStore) *Handler {
 		ExecutionDeadlineSeconds: 295,
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	s3Mock := &mockExecutorS3{}
 	exec := executor.New(kubeClient, nil, s3Mock, nil, executor.ExecutorConfig{
 		ArtifactBucket:  "test-bucket",
@@ -909,11 +909,12 @@ func TestHandleCreate_WhenSyncSucceeds_ItShouldReturnOutputInline(t *testing.T) 
 		t.Error("sync response should include duration_ms inline")
 	}
 
-	if status == "succeeded" {
+	switch status {
+	case "succeeded":
 		if resp["output"] == nil {
 			t.Error("succeeded sync response should include output inline")
 		}
-	} else if status == "failed" {
+	case "failed":
 		if resp["logs"] == nil || resp["logs"] == "" {
 			t.Error("failed sync response should include logs inline")
 		}

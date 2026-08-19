@@ -131,7 +131,7 @@ func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) e
 
 	type row struct {
 		ts, method, operator, action, target, jira, approval, execID, path string
-		code                                                                int
+		code                                                               int
 	}
 
 	rows := make([]row, 0, len(list.Items))

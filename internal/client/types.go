@@ -12,25 +12,25 @@ type Execution struct {
 	Action          string            `json:"action"`
 	RequestedAction string            `json:"requested_action,omitempty"`
 	TargetCluster   string            `json:"target_cluster"`
-	Status         string            `json:"status"`
-	ExecutionMode string            `json:"execution_mode,omitempty"`
-	Scope          string            `json:"scope"`
-	Type           string            `json:"type"`
-	DryRun         bool              `json:"dry_run"`
-	Force          bool              `json:"force"`
-	Jira           string            `json:"jira,omitempty"`
-	Operator       string            `json:"operator,omitempty"`
-	Revision       string            `json:"revision,omitempty"`
-	Params         map[string]string `json:"params,omitempty"`
-	CreatedAt      *time.Time        `json:"created_at,omitempty"`
-	DispatchedAt   *time.Time        `json:"dispatched_at,omitempty"`
-	CompletedAt    *time.Time        `json:"completed_at,omitempty"`
-	DurationMs     *int64            `json:"duration_ms,omitempty"`
-	OutputBytes    *int64            `json:"output_bytes,omitempty"`
-	LogBytes       *int64            `json:"log_bytes,omitempty"`
-	OutputFormat   string            `json:"output_format,omitempty"`
-	Output         FlexString        `json:"output,omitempty"`
-	Logs           string            `json:"logs,omitempty"`
+	Status          string            `json:"status"`
+	ExecutionMode   string            `json:"execution_mode,omitempty"`
+	Scope           string            `json:"scope"`
+	Type            string            `json:"type"`
+	DryRun          bool              `json:"dry_run"`
+	Force           bool              `json:"force"`
+	Jira            string            `json:"jira,omitempty"`
+	Operator        string            `json:"operator,omitempty"`
+	Revision        string            `json:"revision,omitempty"`
+	Params          map[string]string `json:"params,omitempty"`
+	CreatedAt       *time.Time        `json:"created_at,omitempty"`
+	DispatchedAt    *time.Time        `json:"dispatched_at,omitempty"`
+	CompletedAt     *time.Time        `json:"completed_at,omitempty"`
+	DurationMs      *int64            `json:"duration_ms,omitempty"`
+	OutputBytes     *int64            `json:"output_bytes,omitempty"`
+	LogBytes        *int64            `json:"log_bytes,omitempty"`
+	OutputFormat    string            `json:"output_format,omitempty"`
+	Output          FlexString        `json:"output,omitempty"`
+	Logs            string            `json:"logs,omitempty"`
 }
 
 // FlexString handles API fields that may be a string, array, or object.

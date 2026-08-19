@@ -114,7 +114,7 @@ func downloadArtifact(ctx context.Context, global *GlobalOptions, opts *download
 	}
 
 	// Ensure file ends with newline so shell tools (cat, less) render cleanly
-	f.Write([]byte("\n"))
+	_, _ = f.Write([]byte("\n"))
 
 	fmt.Fprintf(os.Stderr, "Saved %s (%d bytes) → %s\n", opts.artifact, n, outPath)
 	return nil

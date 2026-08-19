@@ -79,4 +79,3 @@ func (m *mockExecStore) QueryByTargetAndStatus(_ context.Context, _ string, _ st
 func (m *mockExecStore) QueryTerminalByTarget(_ context.Context, _ string, _ time.Duration) ([]*store.Execution, error) {
 	return nil, nil
 }
-

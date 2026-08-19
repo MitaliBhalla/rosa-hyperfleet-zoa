@@ -98,10 +98,10 @@ func TestDescribeVPCEndpoint_WhenEndpointExists_ItShouldReturnDetails(t *testing
 	mock := &mockEC2Client{
 		endpoints: []ec2types.VpcEndpoint{
 			{
-				VpcEndpointId: aws.String("vpce-abc123"),
-				VpcId:         aws.String("vpc-001"),
-				ServiceName:   aws.String("com.amazonaws.us-east-1.s3"),
-				State:         ec2types.StateAvailable,
+				VpcEndpointId:   aws.String("vpce-abc123"),
+				VpcId:           aws.String("vpc-001"),
+				ServiceName:     aws.String("com.amazonaws.us-east-1.s3"),
+				State:           ec2types.StateAvailable,
 				VpcEndpointType: ec2types.VpcEndpointTypeGateway,
 			},
 		},

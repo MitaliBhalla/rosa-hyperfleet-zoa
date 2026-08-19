@@ -26,7 +26,7 @@ func TestGarbageCollect_WhenTerminalExecutionExists_ItShouldCleanAndMark(t *test
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -62,8 +62,10 @@ func TestGarbageCollect_WhenNoTerminalExecutions_ItShouldDoNothing(t *testing.T)
 	}
 
 	cfg := testConfig()
-	exec := executor.New(fake.NewSimpleClientset(), nil, nil, nil, executor.ExecutorConfig{}, noopLogger())
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, exec, cfg, noopLogger())
+	kubeForExec := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	exec := executor.New(kubeForExec, nil, nil, nil, executor.ExecutorConfig{}, noopLogger())
+	kubeForReconciler := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeForReconciler, nil, exec, cfg, noopLogger())
 
 	err := r.garbageCollect(context.Background())
 	if err != nil {
@@ -80,7 +82,7 @@ func TestOrphanGC_WhenJobHasNoMatchingExecution_ItShouldCleanup(t *testing.T) {
 		getResponses: map[string]*store.Execution{},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -93,7 +95,7 @@ func TestOrphanGC_WhenJobHasNoMatchingExecution_ItShouldCleanup(t *testing.T) {
 			Name:      "zoa-orphan-123",
 			Namespace: cfg.JobsNamespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "zoa",
+				"app.kubernetes.io/managed-by":  "zoa",
 				"zoa.openshift.io/execution-id": "orphan-123",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
@@ -123,7 +125,7 @@ func TestOrphanGC_WhenJobHasMatchingExecution_ItShouldSkip(t *testing.T) {
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -135,7 +137,7 @@ func TestOrphanGC_WhenJobHasMatchingExecution_ItShouldSkip(t *testing.T) {
 			Name:      "zoa-valid-123",
 			Namespace: cfg.JobsNamespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "zoa",
+				"app.kubernetes.io/managed-by":  "zoa",
 				"zoa.openshift.io/execution-id": "valid-123",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-1 * time.Hour)),
@@ -163,7 +165,7 @@ func TestOrphanGC_WhenJobIsRecent_ItShouldSkip(t *testing.T) {
 		getResponses: map[string]*store.Execution{},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -176,7 +178,7 @@ func TestOrphanGC_WhenJobIsRecent_ItShouldSkip(t *testing.T) {
 			Name:      "zoa-recent-456",
 			Namespace: cfg.JobsNamespace,
 			Labels: map[string]string{
-				"app.kubernetes.io/managed-by": "zoa",
+				"app.kubernetes.io/managed-by":  "zoa",
 				"zoa.openshift.io/execution-id": "recent-456",
 			},
 			CreationTimestamp: metav1.NewTime(time.Now().Add(-5 * time.Minute)),
@@ -203,7 +205,7 @@ func TestRunGC_WhenCalled_ItShouldExecuteGCPhases(t *testing.T) {
 		executions:   []*store.Execution{},
 		getResponses: map[string]*store.Execution{},
 	}
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 

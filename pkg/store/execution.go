@@ -244,7 +244,6 @@ func (s *DynamoDBExecutionStore) applyFilterConditions(builder expression.Builde
 	return builder
 }
 
-
 // paginateQuery executes a DynamoDB query with pagination and max-pages guard.
 func (s *DynamoDBExecutionStore) paginateQuery(ctx context.Context, expr expression.Expression, indexName *string, resultLimit int) ([]*Execution, error) {
 	const maxPages = 10

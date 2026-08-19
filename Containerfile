@@ -1,4 +1,4 @@
-FROM registry.access.redhat.com/ubi9/go-toolset:1.26.5-1785791459 AS builder
+FROM registry.access.redhat.com/ubi9/go-toolset:1.26.5-1786351949 AS builder
 USER root
 
 ARG TARGETOS=linux
@@ -34,6 +34,7 @@ LABEL name="zoa-lambda" \
       summary="ZOA Lambda function" \
       description="Minimal Lambda image for ZOA API and Worker" \
       io.k8s.display-name="zoa-lambda" \
+      io.k8s.description="ZOA Lambda function for API and Worker execution" \
       com.redhat.component="zoa-lambda-container" \
       distribution-scope="public" \
       url="https://github.com/openshift-online/rosa-hyperfleet-zoa"

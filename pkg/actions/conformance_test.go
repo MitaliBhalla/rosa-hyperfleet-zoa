@@ -1,7 +1,6 @@
 package actions
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -220,7 +219,7 @@ func TestAllRegisteredActions_OutputContract(t *testing.T) {
 		result := &ActionResult{Success: true, Output: nil, Summary: ""}
 		if result.Success && result.Summary == "" && result.Output == nil {
 			// This is the anti-pattern we're documenting
-			_ = fmt.Sprintf("TA must set Summary on success and Output should be non-nil JSON-serializable data")
+			_ = "TA must set Summary on success and Output should be non-nil JSON-serializable data"
 		}
 	})
 }

@@ -214,15 +214,15 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, actionNam
 		h.logger.Error("async dispatch failed", "error", err, "execution_id", executionID)
 		_ = h.executionStore.TransitionWithMetadata(ctx, executionID, store.StatusDispatched, store.StatusFailed,
 			map[string]interface{}{
-				"completedAt":     time.Now().Format(time.RFC3339Nano),
-				"durationMs": int64(0),
+				"completedAt": time.Now().Format(time.RFC3339Nano),
+				"durationMs":  int64(0),
 			})
 		writeJSON(w, http.StatusOK, createResponse{
 			ID:             executionID,
 			TargetCluster:  h.cfg.TargetCluster,
 			Status:         string(store.StatusFailed),
 			ExecutedAction: executedAction,
-			ExecutionMode: execMode,
+			ExecutionMode:  execMode,
 		})
 		return
 	}
@@ -232,7 +232,7 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, actionNam
 		TargetCluster:  h.cfg.TargetCluster,
 		Status:         string(store.StatusDispatched),
 		ExecutedAction: executedAction,
-		ExecutionMode: execMode,
+		ExecutionMode:  execMode,
 	})
 }
 

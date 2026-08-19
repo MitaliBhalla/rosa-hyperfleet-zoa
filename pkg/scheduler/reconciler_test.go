@@ -166,7 +166,8 @@ func TestDispatchApproved_WhenApprovedExecutionsExist_ItShouldSelfInvokeWorkerLa
 	lambdaClient := &mockLambdaClient{}
 	cfg := testConfig()
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), lambdaClient, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, lambdaClient, nil, cfg, noopLogger())
 
 	err := r.dispatchApproved(context.Background())
 	if err != nil {
@@ -200,7 +201,8 @@ func TestDispatchApproved_WhenNoApprovedExecutions_ItShouldDoNothing(t *testing.
 	lambdaClient := &mockLambdaClient{}
 	cfg := testConfig()
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), lambdaClient, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, lambdaClient, nil, cfg, noopLogger())
 
 	err := r.dispatchApproved(context.Background())
 	if err != nil {
@@ -228,7 +230,8 @@ func TestDispatchApproved_WhenBatchLimitReached_ItShouldStopProcessing(t *testin
 	cfg := testConfig()
 	cfg.MaxBatchPerTick = 5
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), lambdaClient, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, lambdaClient, nil, cfg, noopLogger())
 
 	err := r.dispatchApproved(context.Background())
 	if err != nil {
@@ -249,7 +252,8 @@ func TestDispatchApproved_WhenInvokeFails_ItShouldRollBackToApproved(t *testing.
 	lambdaClient := &mockLambdaClient{err: fmt.Errorf("lambda invoke error")}
 	cfg := testConfig()
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), lambdaClient, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, lambdaClient, nil, cfg, noopLogger())
 
 	err := r.dispatchApproved(context.Background())
 	if err != nil {
@@ -281,7 +285,8 @@ func TestDispatchApproved_WhenContextCancelled_ItShouldStopEarly(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Immediately cancelled
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), lambdaClient, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, lambdaClient, nil, cfg, noopLogger())
 
 	err := r.dispatchApproved(ctx)
 	if err != nil {
@@ -309,7 +314,8 @@ func TestTimeoutDispatched_WhenExecutionExceedsTimeout_ItShouldMarkTimedOut(t *t
 	}
 	cfg := testConfig()
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, nil, nil, cfg, noopLogger())
 
 	err := r.timeoutDispatched(context.Background())
 	if err != nil {
@@ -340,7 +346,8 @@ func TestTimeoutDispatched_WhenExecutionWithinTimeout_ItShouldNotTransition(t *t
 	}
 	cfg := testConfig()
 
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, nil, nil, cfg, noopLogger())
 
 	err := r.timeoutDispatched(context.Background())
 	if err != nil {
@@ -356,17 +363,17 @@ func TestPollAsyncJobs_WhenJobCompleted_ItShouldTransitionToSucceeded(t *testing
 	execStore := &mockExecutionStore{
 		executions: []*store.Execution{
 			{
-				ID:             "async-ok",
-				Action:         "get-resource",
-				Status:         store.StatusDispatched,
+				ID:            "async-ok",
+				Action:        "get-resource",
+				Status:        store.StatusDispatched,
 				ExecutionMode: "async",
-				DispatchedAt:   time.Now().Add(-30 * time.Second).Format(time.RFC3339Nano),
-				TargetCluster:  "test-cluster",
+				DispatchedAt:  time.Now().Add(-30 * time.Second).Format(time.RFC3339Nano),
+				TargetCluster: "test-cluster",
 			},
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 
 	cfg := testConfig()
@@ -406,17 +413,17 @@ func TestPollAsyncJobs_WhenJobFailed_ItShouldTransitionToFailed(t *testing.T) {
 	execStore := &mockExecutionStore{
 		executions: []*store.Execution{
 			{
-				ID:             "async-fail",
-				Action:         "delete-pod",
-				Status:         store.StatusDispatched,
+				ID:            "async-fail",
+				Action:        "delete-pod",
+				Status:        store.StatusDispatched,
 				ExecutionMode: "async",
-				DispatchedAt:   time.Now().Add(-60 * time.Second).Format(time.RFC3339Nano),
-				TargetCluster:  "test-cluster",
+				DispatchedAt:  time.Now().Add(-60 * time.Second).Format(time.RFC3339Nano),
+				TargetCluster: "test-cluster",
 			},
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -455,17 +462,17 @@ func TestPollAsyncJobs_WhenJobStillRunning_ItShouldNotTransition(t *testing.T) {
 	execStore := &mockExecutionStore{
 		executions: []*store.Execution{
 			{
-				ID:             "async-running",
-				Action:         "delete-pod",
-				Status:         store.StatusDispatched,
+				ID:            "async-running",
+				Action:        "delete-pod",
+				Status:        store.StatusDispatched,
 				ExecutionMode: "async",
-				DispatchedAt:   time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
-				TargetCluster:  "test-cluster",
+				DispatchedAt:  time.Now().Add(-5 * time.Second).Format(time.RFC3339Nano),
+				TargetCluster: "test-cluster",
 			},
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -514,7 +521,8 @@ func TestTimeoutDispatched_WhenAsyncWithinOverhead_ItShouldNotTimeout(t *testing
 		},
 	}
 	cfg := testConfig()
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, nil, nil, cfg, noopLogger())
 
 	err := r.timeoutDispatched(context.Background())
 	if err != nil {
@@ -543,7 +551,8 @@ func TestTimeoutDispatched_WhenAsyncExceedsOverhead_ItShouldTimeout(t *testing.T
 		},
 	}
 	cfg := testConfig()
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, nil, nil, cfg, noopLogger())
 
 	err := r.timeoutDispatched(context.Background())
 	if err != nil {
@@ -575,7 +584,8 @@ func TestTimeoutDispatched_WhenSyncExceedsTimeout_ItShouldNotAddOverhead(t *test
 		},
 	}
 	cfg := testConfig()
-	r := NewReconciler(execStore, fake.NewSimpleClientset(), nil, nil, cfg, noopLogger())
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	r := NewReconciler(execStore, kubeClient, nil, nil, cfg, noopLogger())
 
 	err := r.timeoutDispatched(context.Background())
 	if err != nil {
@@ -657,7 +667,7 @@ func TestPollAsyncJobs_WhenJobCompleted_ItShouldEnrichWithArtifactSizes(t *testi
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 
@@ -732,7 +742,7 @@ func TestPollAsyncJobs_WhenJobCompletedWithTarGz_ItShouldDetectFormat(t *testing
 		},
 	}
 
-	kubeClient := fake.NewSimpleClientset()
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
 	ctx := context.Background()
 	cfg := testConfig()
 

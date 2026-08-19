@@ -14,22 +14,22 @@ import (
 )
 
 type runOptions struct {
-	namespace      string
-	allNS          bool
-	selector       string
-	verbose        bool
-	name           string
-	resource       string
-	jira           string
-	force          bool
-	dryRun         bool
-	noWait         bool
-	wait           bool
-	waitTimeout    time.Duration
-	pollInterval   time.Duration
-	timeout        time.Duration
-	executionMode  string
-	params         []string
+	namespace     string
+	allNS         bool
+	selector      string
+	verbose       bool
+	name          string
+	resource      string
+	jira          string
+	force         bool
+	dryRun        bool
+	noWait        bool
+	wait          bool
+	waitTimeout   time.Duration
+	pollInterval  time.Duration
+	timeout       time.Duration
+	executionMode string
+	params        []string
 }
 
 func newRunCommand(global *GlobalOptions) *cobra.Command {
@@ -70,8 +70,8 @@ On failure, logs are printed to stderr. Use --no-wait to fire and forget.`,
 				return fmt.Errorf("missing action name\n\n  Usage: zoa run <action> --jira <ticket>\n  Run 'zoa actions' to see available actions")
 			}
 			if len(args) > 1 {
-			return fmt.Errorf("unexpected argument %q — action parameters must be passed as flags\n\n  Example: zoa run %s --resource %s --jira <ticket>\n  Run 'zoa describe %s' to see available parameters",
-				args[1], args[0], args[1], args[0])
+				return fmt.Errorf("unexpected argument %q — action parameters must be passed as flags\n\n  Example: zoa run %s --resource %s --jira <ticket>\n  Run 'zoa describe %s' to see available parameters",
+					args[1], args[0], args[1], args[0])
 			}
 			return nil
 		},

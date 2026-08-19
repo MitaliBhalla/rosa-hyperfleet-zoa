@@ -146,7 +146,7 @@ func TestHttpRequestFromEvent_WhenHeaders_ItShouldCopyThem(t *testing.T) {
 	event := newMockHTTPEvent("POST", "/api/v0/trusted-actions/run", "")
 	event.Headers = map[string]string{
 		"content-type":    "application/json",
-		"x-account-id":   "123456789012",
+		"x-account-id":    "123456789012",
 		"x-forwarded-for": "1.2.3.4",
 	}
 	req, err := httpRequestFromEvent(context.Background(), event)

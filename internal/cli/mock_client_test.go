@@ -3,10 +3,8 @@ package cli
 import (
 	"context"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
-	"strings"
 
 	"github.com/openshift-online/rosa-hyperfleet-zoa/internal/client"
 )
@@ -84,13 +82,5 @@ func newMockGlobalOpts(mock *mockClient) *GlobalOptions {
 		ClientFactory: func(_ *GlobalOptions) (APIClient, error) {
 			return mock, nil
 		},
-	}
-}
-
-func newMockRawResponse(body string, status int) *http.Response {
-	return &http.Response{
-		StatusCode: status,
-		Body:       io.NopCloser(strings.NewReader(body)),
-		Header:     http.Header{"Content-Type": []string{"application/json"}},
 	}
 }
