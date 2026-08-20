@@ -1,0 +1,27 @@
+---
+- op: replace
+  path: /metadata/name
+  value: zoa-lambda
+- op: replace
+  path: /spec/componentName
+  value: zoa-lambda
+- op: replace
+  path: /spec/application
+  value: rosa-hyperfleet-zoa
+- op: replace
+  path: /spec/source/git/url
+  value: https://github.com/openshift-online/rosa-hyperfleet-zoa
+- op: replace
+  path: /spec/source/git/dockerfileUrl
+  value: "Containerfile"
+- op: replace
+  path: /spec/source/git/revision
+  value: main
+- op: replace
+  path: /metadata/annotations/build.appstudio.openshift.io~1pipeline
+  value: '{"name":"docker-build-multi-platform-oci-ta","bundle":"latest"}'
+- op: add
+  path: /metadata/annotations/build.appstudio.openshift.io~1request
+  value: configure-pac
+- op: remove
+  path: /metadata/annotations/image.redhat.com~1generate

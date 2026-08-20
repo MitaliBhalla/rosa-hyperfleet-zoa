@@ -1,0 +1,20 @@
+---
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../../base
+  - image-repository.yaml
+patches:
+  - path: component-patch.yaml
+    target:
+      kind: Component
+  - path: integrationtestscenario-patch.yaml
+    target:
+      kind: IntegrationTestScenario
+      name: example-main-enterprise-contract
+  - path: releaseplan-patch.yaml
+    target:
+      kind: ReleasePlan
+  - path: application-patch.yaml
+    target:
+      kind: Application

@@ -1,0 +1,33 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: EnterpriseContractPolicy
+metadata:
+  name: zoa-lambda-enterprise-contract
+  namespace: rosa-tenant
+spec:
+  description: >-
+    Conforma policy for ZOA Lambda images. Allows AWS Lambda base images on
+    public.ecr.aws and the Amazon Linux 2023 RPM signing key used by those bases.
+  publicKey: k8s://openshift-pipelines/public-key
+  sources:
+    - name: Release Policies
+      data:
+        - github.com/release-engineering/rhtap-ec-policy//data
+        - oci::quay.io/konflux-ci/tekton-catalog/data-acceptable-bundles:latest
+        - oci::quay.io/konflux-ci/konflux-vanguard/data-acceptable-bundles:latest
+        - oci::quay.io/konflux-ci/integration-service-catalog/data-acceptable-bundles:latest
+      policy:
+        - oci::quay.io/conforma/release-policy:konflux
+      ruleData:
+        allowed_registry_prefixes:
+          - registry.access.redhat.com/
+          - registry.redhat.io/
+          - public.ecr.aws/lambda/
+          - public.ecr.aws/awsguru/
+        allowed_rpm_signature_keys:
+          - 199e2f91fd431d51
+          # Amazon Linux 2023 — Lambda provided:al2023 base images
+          - e951904ad832c631
+      config:
+        include:
+          - "@redhat"
