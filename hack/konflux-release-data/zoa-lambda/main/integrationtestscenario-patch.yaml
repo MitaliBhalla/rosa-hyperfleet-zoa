@@ -1,0 +1,19 @@
+---
+- op: replace
+  path: /metadata/name
+  value: zoa-lambda-main-enterprise-contract
+- op: replace
+  path: /spec/application
+  value: rosa-hyperfleet-zoa
+- op: replace
+  path: /spec/contexts
+  value:
+    - description: Component testing
+      name: component
+- op: replace
+  path: /spec/params
+  value:
+    - name: POLICY_CONFIGURATION
+      value: rosa-tenant/zoa-lambda-enterprise-contract
+    - name: SINGLE_COMPONENT
+      value: "true"

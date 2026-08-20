@@ -1,0 +1,10 @@
+---
+- op: replace
+  path: /metadata/name
+  value: rosa-hyperfleet-zoa
+- op: replace
+  path: /spec/description
+  value: "rosa-hyperfleet-zoa"
+- op: replace
+  path: /spec/displayName
+  value: "rosa-hyperfleet-zoa"

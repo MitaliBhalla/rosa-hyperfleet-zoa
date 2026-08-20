@@ -1,0 +1,17 @@
+---
+apiVersion: appstudio.redhat.com/v1alpha1
+kind: Component
+metadata:
+  name: zoa-runner
+  annotations:
+    build.appstudio.openshift.io/request: configure-pac
+    build.appstudio.openshift.io/pipeline: '{"name":"docker-build-multi-platform-oci-ta","bundle":"latest"}'
+spec:
+  componentName: zoa-runner
+  application: rosa-hyperfleet-zoa
+  source:
+    git:
+      url: https://github.com/openshift-online/rosa-hyperfleet-zoa
+      context: .
+      dockerfileUrl: Containerfile.runner
+      revision: main
