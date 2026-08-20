@@ -1,3 +1,5 @@
+ARG UBI_VERSION="9.8-1786987521"
+
 FROM registry.access.redhat.com/ubi9/go-toolset:1.26.5-1786351949 AS builder
 USER root
 
@@ -18,11 +20,7 @@ RUN GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown") && \
     -ldflags="-w -s -X ${VERSION_PKG}.Version=${ZOA_VERSION} -X ${VERSION_PKG}.GitCommit=${GIT_COMMIT} -X ${VERSION_PKG}.BuildDate=${BUILD_DATE}" \
     -o /app/zoa-lambda ./cmd/zoa-lambda/
 
-# Lambda Web Adapter (enables response streaming for API mode)
-FROM public.ecr.aws/awsguru/aws-lambda-adapter:1.0.1 AS lwa
-
-# Minimal Lambda runtime — Go static binary needs no OS dependencies
-FROM public.ecr.aws/lambda/provided:al2023-x86_64
+FROM registry.access.redhat.com/ubi9/ubi-minimal:${UBI_VERSION}
 
 ARG VERSION=0.0.1
 ARG RELEASE=1
@@ -40,6 +38,7 @@ LABEL name="zoa-lambda" \
       url="https://github.com/openshift-online/rosa-hyperfleet-zoa"
 
 COPY --from=builder /app/zoa-lambda /usr/local/bin/zoa-lambda
-COPY --from=lwa /lambda-adapter /opt/extensions/lambda-adapter
+
+USER 65534:65534
 
 ENTRYPOINT ["/usr/local/bin/zoa-lambda"]

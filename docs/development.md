@@ -85,7 +85,7 @@ On merge to `main`, a GitHub Action checks if the version is new and creates a g
 
 | Image | Containerfile | Purpose |
 |-------|---------------|---------|
-| `zoa-lambda` | `Containerfile` | Lambda container (UBI9 + `zoa-lambda` binary + Lambda Web Adapter) |
+| `zoa-lambda` | `Containerfile` | Lambda container (UBI-minimal + `zoa-lambda` binary) |
 | `zoa-runner` | `Containerfile.runner` | Async runner (UBI9 + `zoa-runner` + `zoa` CLI, runs inside K8s Jobs) |
 
 ```bash

@@ -113,11 +113,30 @@ sequenceDiagram
 - No output size limit — writes directly to S3 without Lambda response constraints
 - Clean permission separation: SA in K8s audit logs has only TA-declared RBAC; S3 upload uses a separate STS credential with no K8s permissions — no need for two containers or intermediate storage
 
-## Why LWA (Lambda Web Adapter)?
+## Response Streaming
 
-Standard Lambda response body is limited to 6MB. LWA with `RESPONSE_STREAM` on the API Lambda enables streamed responses up to 200MB (first 6MB uncapped, remainder at 2MBps). This limit applies equally to sync outputs (returned inline) and async outputs (proxied from S3 via `zoa download`) — both are served through the API Lambda response. Without LWA, any TA producing >6MB output would be truncated regardless of execution mode.
+Standard Lambda response body is limited to 6MB. Native Go streaming (`LambdaFunctionURLStreamingResponse` from `aws-lambda-go`) with `RESPONSE_STREAM` invoke mode on the Function URL enables streamed responses up to 200MB (first 6MB uncapped, remainder at 2MBps). This limit applies equally to sync outputs (returned inline) and async outputs (proxied from S3 via `zoa download`) — both are served through the API Lambda response. The streaming adapter lives in `pkg/lambdahttp/` and converts Function URL events to `net/http` requests served by the standard Go handler.
 
 ## Package Responsibilities
+
+### `pkg/actions` — Trusted Action Registry
+
+Defines the `Action` interface (`Metadata`, `Validate`, `Execute`) and a global in-memory registry. Each TA is a standalone Go type that self-registers at init-time. The package also provides:
+- `ActionMetadata` — declarative TA manifest (scope, type, RBAC, parameters, timeouts, cooldown, dry-run link)
+- `RBACConfig` / `RBACRule` — per-TA Kubernetes RBAC expressed as code, used by the executor to create Role/ClusterRole
+- `ValidateRequiredParams` / `ApplyDefaults` — shared validation helpers so TAs don't repeat boilerplate
+- Conformance tests verifying structural invariants across all registered TAs (scope validity, RBAC presence, parameter definitions)
+
+### `pkg/lambdahttp` — Function URL Streaming Adapter
+
+Converts AWS Lambda Function URL events (`events.LambdaFunctionURLRequest`) into standard `*http.Request` objects and serves them through the Go `http.Handler` interface. Returns a `LambdaFunctionURLStreamingResponse` (io.Reader body) enabling native response streaming up to 200MB. This decouples all HTTP handler logic from the Lambda runtime — the rest of the codebase is pure `net/http`.
+
+### `pkg/metrics` — CloudWatch EMF Instrumentation
+
+Emits [Embedded Metric Format](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Embedded_Metric_Format.html) structured JSON to stdout, which CloudWatch Logs automatically parses into CloudWatch Metrics (scraped by YACE into Prometheus for alerting). Provides:
+- `Emit()` — writes a single EMF log line with arbitrary dimensions and metric values
+- `HTTPMetrics()` — middleware that wraps `http.Handler` and emits `RequestDuration`, `RequestCount`, and `ServerErrors` per request
+- Type-safe metric constructors: `Count`, `Milliseconds`, `Seconds`, `Bytes`
 
 ### `pkg/api` — HTTP Handlers
 

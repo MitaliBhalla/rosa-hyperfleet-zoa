@@ -18,11 +18,11 @@ Each Lambda has different operational characteristics that are per-function AWS 
 
 | Setting | API | Worker | Access (PLANNED) |
 |---------|-----|--------|-------------------|
-| Invocation | Function URL + LWA | EventBridge + self-invoke | API Gateway |
+| Invocation | Function URL (streaming) | EventBridge + self-invoke | API Gateway |
 | VPC | Yes (EKS access) | Yes (EKS access) | No (no cluster access) |
 | Throttle behavior | HTTP 429 to caller | AWS queues + retries (up to 6h) | HTTP 429 to caller |
 
-These cannot share a single function because timeout, concurrency, invocation mode (LWA vs standard handler), and VPC attachment are per-function settings.
+These cannot share a single function because timeout, concurrency, invocation mode (streaming vs standard handler), and VPC attachment are per-function settings.
 
 Timeout and concurrency values are configured in Terraform (`terraform/modules/zoa-lambda/variables.tf`).
 

@@ -12,7 +12,7 @@ This file provides guidance to AI coding assistants when working with this repos
 
 ZOA deploys **2 Lambda functions per target VPC** (same binary, `HANDLER_MODE` env var), with failure domain isolation per cluster:
 
-- **API Lambda** — Function URL with LWA streaming, handles CLI requests, sync TA execution
+- **API Lambda** — Function URL with native Go streaming, handles CLI requests, sync TA execution
 - **Worker Lambda** — EventBridge-triggered, handles reconciler, GC, async TA execution via self-invocation
 
 Per-VPC deployment means a failure in one cluster's ZOA cannot cascade to another. The entire data path (Lambda, DynamoDB, S3, EventBridge, KMS) is serverless with zero persistent compute.
@@ -38,7 +38,7 @@ Execution flow: CLI → SigV4-signed HTTPS → API Lambda Function URL → Dynam
 | `pkg/scheduler/` | Reconciler and GC (EventBridge-triggered worker tasks) |
 | `pkg/config/` | Env-var based configuration with per-mode validation |
 | `pkg/metrics/` | CloudWatch EMF metric emission |
-| `Containerfile` | Lambda container image (UBI9 + zoa-lambda + LWA) |
+| `Containerfile` | Lambda container image (UBI-minimal + zoa-lambda) |
 | `Containerfile.runner` | Async runner image (UBI9 + zoa-runner + zoa CLI) |
 
 ## Build & Test Commands

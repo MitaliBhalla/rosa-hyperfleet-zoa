@@ -13,7 +13,7 @@ This repository is the single source of truth for ZOA: the API server, execution
 | Component | Binary | Runs on | Purpose |
 |-----------|--------|---------|---------|
 | CLI | `zoa` | SRE laptop | Operator interface — dispatch, monitor, approve |
-| API Lambda | `zoa-lambda` | AWS Lambda (per VPC) | HTTP handler, sync TA execution, LWA streaming |
+| API Lambda | `zoa-lambda` | AWS Lambda (per VPC) | HTTP handler, sync TA execution, native streaming |
 | Worker Lambda | `zoa-lambda` | AWS Lambda (per VPC) | Reconciler, GC, async/approved TA dispatch |
 | Async Runner | `zoa-runner` | K8s Job (target EKS) | Executes async TAs in-process, uploads artifacts to S3 |
 | Trusted Actions | — | Compiled into `zoa-lambda` + `zoa-runner` | Go implementations in `pkg/actions/` |
@@ -66,8 +66,8 @@ Composite sync availability: **99.95%** (~22 min/month downtime budget, bottlene
 
 ZOA deploys **two Lambda functions per target VPC** (one per EKS cluster). Both use the same container image differentiated by `HANDLER_MODE`:
 
-- **API Lambda** — Function URL with IAM auth and LWA response streaming. Handles HTTP requests from the CLI and executes sync TAs directly.
-- **Worker Lambda** — Standard handler triggered by EventBridge Scheduler. Runs the reconciler (1m), GC (5m), and TA execution for approved workflows (sync or async) via self-invocation.
+- **API Lambda** — Function URL with IAM auth (invoke mode: `RESPONSE_STREAM`). Handles HTTP requests from the CLI and executes sync TAs directly.
+- **Worker Lambda** — EventBridge-triggered (invoke mode: `BUFFERED`). Runs the reconciler (1m), GC (5m), and TA execution for approved workflows (sync or async) via self-invocation.
 
 The split exists because Lambda timeout, concurrency, and invocation mode (streaming vs standard) are per-function settings.
 
@@ -84,7 +84,7 @@ graph TD
         subgraph rc_vpc["Target RC VPC"]
             BOUNDARY_RC["rosa-boundary<br/>ECS task · PLANNED"]
             EB_RC["EventBridge Scheduler"]
-            API_RC["API Lambda<br/>(Function URL, LWA)"]
+            API_RC["API Lambda<br/>(Function URL, streaming)"]
             WORKER_RC["Worker Lambda<br/>(self-invoke)"]
             EKS_RC["RC EKS"]
         end
@@ -94,7 +94,7 @@ graph TD
         subgraph mc_vpc["Target MC VPC"]
             BOUNDARY_MC["rosa-boundary<br/>ECS task · PLANNED"]
             EB_MC["EventBridge Scheduler"]
-            API_MC["API Lambda<br/>(Function URL, LWA)"]
+            API_MC["API Lambda<br/>(Function URL, streaming)"]
             WORKER_MC["Worker Lambda<br/>(self-invoke)"]
             EKS_MC["MC EKS"]
         end
@@ -157,13 +157,13 @@ All modes persist execution state in DynamoDB before dispatch.
 
 **Async output delivery**: `zoa-runner` uploads output/logs to S3 after Job completion. The CLI fetches via `GET /runs/{id}?include=output`.
 
-For details on K8s resources and the LWA streaming rationale, see [Implementation Details](docs/architecture/implementation.md).
+For details on K8s resources and the streaming architecture, see [Implementation Details](docs/architecture/implementation.md).
 
 ## Container Images
 
 | Image | Containerfile | Contents | Purpose |
 |-------|---------------|----------|---------|
-| `zoa-lambda` | `Containerfile` | `zoa-lambda` binary + Lambda Web Adapter | Deployed as Lambda function (API + Worker modes) |
+| `zoa-lambda` | `Containerfile` | `zoa-lambda` binary (UBI-minimal) | Deployed as Lambda function (API + Worker modes) |
 | `zoa-runner` | `Containerfile.runner` | `zoa-runner` + `zoa` CLI | Runs inside K8s Jobs for async TA execution |
 
 ## Quick Start

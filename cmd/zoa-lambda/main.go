@@ -1,11 +1,10 @@
 // Binary zoa-lambda is the Lambda entry point. It performs dependency injection
-// and starts either an HTTP server (API mode with LWA) or a native Lambda handler (Worker mode).
+// and starts a native Lambda handler for both API and Worker modes.
 package main
 
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"strings"
 
@@ -24,6 +23,7 @@ import (
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/config"
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/executor"
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/handler"
+	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/lambdahttp"
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/scheduler"
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/store"
 )
@@ -128,16 +128,15 @@ func main() {
 
 	switch cfg.HandlerMode {
 	case "api":
-		// API mode: start HTTP server on :8080 for Lambda Web Adapter (LWA).
-		// LWA proxies Function URL requests to this server, enabling response streaming.
+		// API mode: native Lambda handler with Function URL streaming.
+		// Converts Function URL events to http.Request, serves via the HTTP handler,
+		// and returns a streaming response (up to 200MB).
 		auditStore := store.NewAuditStore(dynamoClient, cfg.AuditTable, cfg.DynamoDBTTLDays)
 		apiHandler := api.New(cfg, execStore, auditStore, exec, s3Client, logger)
+		streamingHandler := lambdahttp.NewStreamingHandler(apiHandler)
 
-		logger.Info("API mode: starting HTTP server on :8080 for Lambda Web Adapter")
-		if err := http.ListenAndServe(":8080", apiHandler); err != nil {
-			logger.Error("HTTP server failed", "error", err)
-			os.Exit(1)
-		}
+		logger.Info("API mode: native Lambda Function URL streaming handler")
+		lambda.Start(streamingHandler.Handle)
 
 	case "worker":
 		// Worker mode: native Lambda handler. Receives EventBridge schedules

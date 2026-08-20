@@ -51,7 +51,7 @@ func New(cfg *config.Config, execStore store.ExecutionStore, auditStore store.Au
 }
 
 func (h *Handler) registerRoutes() {
-	// LWA readiness probe
+	// Health check endpoint
 	h.mux.HandleFunc("GET /health", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"ok"}`))
