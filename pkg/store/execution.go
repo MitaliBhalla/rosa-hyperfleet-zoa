@@ -575,12 +575,24 @@ func (s *DynamoDBExecutionStore) ListByTargetAndAction(ctx context.Context, targ
 }
 
 func (s *DynamoDBExecutionStore) CountActiveByTarget(ctx context.Context, target string) (int, error) {
-	keyCond := expression.Key("targetCluster").Equal(expression.Value(target))
+	var total int
+	for _, status := range []Status{StatusDispatched, StatusApproved} {
+		count, err := s.countByTargetAndStatus(ctx, target, status)
+		if err != nil {
+			return 0, err
+		}
+		total += count
+	}
+	return total, nil
+}
 
-	filterExpr := expression.Name("status").Equal(expression.Value(string(StatusDispatched))).
-		Or(expression.Name("status").Equal(expression.Value(string(StatusApproved))))
+func (s *DynamoDBExecutionStore) countByTargetAndStatus(ctx context.Context, target string, status Status) (int, error) {
+	keyCond := expression.KeyAnd(
+		expression.Key("targetCluster").Equal(expression.Value(target)),
+		expression.Key("targetStatusKey").BeginsWith(string(status)+"#"),
+	)
 
-	expr, err := expression.NewBuilder().WithKeyCondition(keyCond).WithFilter(filterExpr).Build()
+	expr, err := expression.NewBuilder().WithKeyCondition(keyCond).Build()
 	if err != nil {
 		return 0, fmt.Errorf("building query expression: %w", err)
 	}
@@ -590,9 +602,8 @@ func (s *DynamoDBExecutionStore) CountActiveByTarget(ctx context.Context, target
 	for {
 		input := &dynamodb.QueryInput{
 			TableName:                 &s.tableName,
-			IndexName:                 aws.String("target-index"),
+			IndexName:                 aws.String("target-status-index"),
 			KeyConditionExpression:    expr.KeyCondition(),
-			FilterExpression:          expr.Filter(),
 			ExpressionAttributeNames:  expr.Names(),
 			ExpressionAttributeValues: expr.Values(),
 			Select:                    types.SelectCount,

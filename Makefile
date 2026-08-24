@@ -12,6 +12,14 @@ GIT_COMMIT        = $(shell git rev-parse --short HEAD 2>/dev/null || echo "unkn
 
 CONTAINER_RUNTIME ?= $(shell command -v podman 2>/dev/null || echo docker)
 
+# Tools
+TOOLS_DIR     := ./hack/tools
+TOOLS_BIN_DIR := $(TOOLS_DIR)/bin
+GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/golangci-lint)
+
+$(GOLANGCI_LINT): $(TOOLS_DIR)/go.mod
+	cd $(TOOLS_DIR); go build -tags=tools -o $(abspath $(TOOLS_BIN_DIR))/golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
+
 VERSION     = 0.2.0
 VERSION_PKG = github.com/openshift-online/rosa-hyperfleet-zoa/internal/version
 LDFLAGS     = -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -60,8 +68,8 @@ fmt-check:
 vet:
 	@go vet ./...
 
-lint:
-	@golangci-lint run --timeout=5m ./...
+lint: $(GOLANGCI_LINT)
+	@$(GOLANGCI_LINT) run --timeout=10m ./...
 
 verify: fmt-check vet lint
 
@@ -72,12 +80,14 @@ verify: fmt-check vet lint
 image:
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/amd64 \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(IMAGE_REPO):$(IMAGE_TAG) \
 		-f Containerfile .
 
 image-runner:
 	$(CONTAINER_RUNTIME) build \
 		--platform linux/amd64 \
+		--build-arg GIT_COMMIT=$(GIT_COMMIT) \
 		-t $(RUNNER_IMAGE_REPO):$(IMAGE_TAG) \
 		-f Containerfile.runner .
 

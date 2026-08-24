@@ -477,12 +477,17 @@ func TestDynamoDBExecutionStore_ListByTargetAndAction_WhenSuccess_ItShouldUseTar
 }
 
 func TestDynamoDBExecutionStore_CountActiveByTarget_WhenItemsExist_ItShouldReturnCount(t *testing.T) {
+	var queryCount int
 	mock := &mockDynamoDBAPI{
 		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCount++
 			if params.Select != types.SelectCount {
 				t.Error("expected SelectCount")
 			}
-			return &dynamodb.QueryOutput{Count: 5}, nil
+			if *params.IndexName != "target-status-index" {
+				t.Errorf("expected target-status-index, got %q", *params.IndexName)
+			}
+			return &dynamodb.QueryOutput{Count: 3}, nil
 		},
 	}
 
@@ -491,8 +496,11 @@ func TestDynamoDBExecutionStore_CountActiveByTarget_WhenItemsExist_ItShouldRetur
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if count != 5 {
-		t.Errorf("expected count=5, got %d", count)
+	if queryCount != 2 {
+		t.Errorf("expected 2 queries (dispatched + approved), got %d", queryCount)
+	}
+	if count != 6 {
+		t.Errorf("expected count=6 (3+3), got %d", count)
 	}
 }
 

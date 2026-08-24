@@ -275,7 +275,7 @@ func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
 
 	h.recordAudit(r, http.StatusOK, "", "")
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": executions, "total": len(executions)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": executions, "count": len(executions), "next_token": nil})
 }
 
 func (h *Handler) handleDescribeAction(w http.ResponseWriter, _ *http.Request, actionName string) {
@@ -434,6 +434,9 @@ func (h *Handler) recordAudit(r *http.Request, statusCode int, action, execution
 		Operator:      operator,
 		Action:        action,
 		TargetCluster: h.cfg.TargetCluster,
+		SourceIP:      r.Header.Get("X-Source-IP"),
+		RequestID:     r.Header.Get("X-Request-ID"),
+		UserAgent:     r.Header.Get("User-Agent"),
 		ExecutionID:   executionID,
 		Jira:          o.jira,
 		Force:         o.force,

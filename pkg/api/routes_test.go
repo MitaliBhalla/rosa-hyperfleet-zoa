@@ -97,9 +97,9 @@ func TestHandleListExecutions_WhenExecutionsExist_ItShouldReturnThem(t *testing.
 	if len(items) != 2 {
 		t.Errorf("expected 2 items, got %d", len(items))
 	}
-	total, ok := resp["total"].(float64)
-	if !ok || int(total) != 2 {
-		t.Errorf("expected total=2, got %v", resp["total"])
+	count, ok := resp["count"].(float64)
+	if !ok || int(count) != 2 {
+		t.Errorf("expected count=2, got %v", resp["count"])
 	}
 }
 

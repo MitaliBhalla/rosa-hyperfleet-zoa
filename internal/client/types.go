@@ -69,8 +69,9 @@ func (f FlexString) String() string {
 }
 
 type ExecutionList struct {
-	Items []Execution `json:"items"`
-	Total int         `json:"total,omitempty"`
+	Items     []Execution `json:"items"`
+	Count     int         `json:"count,omitempty"`
+	NextToken *string     `json:"next_token,omitempty"`
 }
 
 type DispatchRequest struct {
@@ -85,7 +86,7 @@ type DispatchRequest struct {
 type DispatchResponse struct {
 	ID             string     `json:"id"`
 	Status         string     `json:"status"`
-	Target         string     `json:"target"`
+	TargetCluster  string     `json:"target_cluster"`
 	ExecutedAction string     `json:"executed_action,omitempty"`
 	ExecutionMode  string     `json:"execution_mode,omitempty"`
 	Output         FlexString `json:"output,omitempty"`
@@ -129,6 +130,9 @@ type AuditEntry struct {
 	Operator      string `json:"operator"`
 	Action        string `json:"action,omitempty"`
 	TargetCluster string `json:"target_cluster,omitempty"`
+	SourceIP      string `json:"source_ip,omitempty"`
+	RequestID     string `json:"request_id,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty"`
 	Jira          string `json:"jira,omitempty"`
 	Force         bool   `json:"force,omitempty"`
 	DryRun        bool   `json:"dry_run,omitempty"`

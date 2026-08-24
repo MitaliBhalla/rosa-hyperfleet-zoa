@@ -101,6 +101,38 @@ func TestValidateRBAC_WhenWildcardResources_ItShouldReject(t *testing.T) {
 	}
 }
 
+// Wildcard Resources with read-only verbs: the validator only catches explicit "secrets"
+// declarations. Wildcards rely on the TA's Validate() to block secrets at runtime.
+func TestValidateRBAC_WhenWildcardResourcesReadOnly_ItShouldAllow(t *testing.T) {
+	meta := ActionMetadata{
+		Name: "read_all",
+		RBAC: &RBACConfig{
+			Rules: []RBACRule{
+				{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"get", "list"}},
+			},
+		},
+	}
+
+	if err := ValidateRBAC(meta); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateRBAC_WhenWildcardResourcesWithWildcardVerbs_ItShouldReject(t *testing.T) {
+	meta := ActionMetadata{
+		Name: "bad_wildcard",
+		RBAC: &RBACConfig{
+			Rules: []RBACRule{
+				{APIGroups: []string{"*"}, Resources: []string{"*"}, Verbs: []string{"*"}},
+			},
+		},
+	}
+
+	if err := ValidateRBAC(meta); err == nil {
+		t.Fatal("expected validation error for full wildcard")
+	}
+}
+
 // TestAllRegisteredActions_RBACCompliance is the compile-time gate:
 // if any registered TA violates RBAC policy, this test fails and the build breaks.
 func TestAllRegisteredActions_RBACCompliance(t *testing.T) {

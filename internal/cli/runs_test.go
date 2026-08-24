@@ -61,7 +61,7 @@ func TestListRuns_WhenExecutionsExist_ItShouldReturnNilError(t *testing.T) {
 						Params:        map[string]string{"namespace": "grafana"},
 					},
 				},
-				Total: 1,
+				Count: 1,
 			}, nil
 		},
 	}

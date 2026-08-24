@@ -337,6 +337,16 @@ func httpRequestFromEvent(ctx context.Context, event *events.APIGatewayV2HTTPReq
 		req.Header.Set(k, v)
 	}
 
+	if ip := event.RequestContext.HTTP.SourceIP; ip != "" {
+		req.Header.Set("X-Source-IP", ip)
+	}
+	if ua := event.RequestContext.HTTP.UserAgent; ua != "" && req.Header.Get("User-Agent") == "" {
+		req.Header.Set("User-Agent", ua)
+	}
+	if rid := event.RequestContext.RequestID; rid != "" {
+		req.Header.Set("X-Request-ID", rid)
+	}
+
 	return req, nil
 }
 

@@ -122,6 +122,15 @@ func main() {
 		execParams.AWSConfig = &awsCfg
 	}
 
+	if err := action.Validate(ctx, execParams); err != nil {
+		execLogger.Error("action validation failed", "error", err)
+		result := &actions.ActionResult{Success: false, Summary: "validation failed: " + err.Error()}
+		outputData := executor.MarshalActionOutput(result)
+		_ = os.WriteFile(filepath.Join(outputDir, "output.json"), outputData, 0o644)
+		writeExitStatus(1)
+		os.Exit(1)
+	}
+
 	execLogger.Info("executing action", "timeout_seconds", meta.TimeoutSeconds)
 
 	result, execErr := action.Execute(ctx, execParams)

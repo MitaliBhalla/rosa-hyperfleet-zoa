@@ -82,13 +82,13 @@ func ValidateAllRegistered() []error {
 }
 
 func matchesForbidden(rule RBACRule, forbidden ForbiddenRBACRule) bool {
-	if len(forbidden.APIGroups) > 0 && !sliceContainsAny(rule.APIGroups, forbidden.APIGroups) {
+	if len(forbidden.APIGroups) > 0 && !sliceOverlaps(rule.APIGroups, forbidden.APIGroups) {
 		return false
 	}
-	if len(forbidden.Resources) > 0 && !sliceContainsAny(rule.Resources, forbidden.Resources) {
+	if len(forbidden.Resources) > 0 && !sliceOverlaps(rule.Resources, forbidden.Resources) {
 		return false
 	}
-	if len(forbidden.Verbs) > 0 && !sliceContainsAny(rule.Verbs, forbidden.Verbs) {
+	if len(forbidden.Verbs) > 0 && !sliceOverlaps(rule.Verbs, forbidden.Verbs) {
 		return false
 	}
 	return true
@@ -106,7 +106,10 @@ func isSecretReadOnly(rule RBACRule) bool {
 	return true
 }
 
-func sliceContainsAny(haystack, needles []string) bool {
+// sliceOverlaps checks if any element in haystack literally matches any element in needles.
+// Wildcards are treated as literal "*" — a rule with Resources: ["*"] only matches
+// a forbidden pattern that also uses ["*"], not one that uses ["secrets"].
+func sliceOverlaps(haystack, needles []string) bool {
 	for _, n := range needles {
 		if sliceContains(haystack, n) {
 			return true

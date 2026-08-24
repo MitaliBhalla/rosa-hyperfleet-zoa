@@ -73,6 +73,9 @@ type AuditEntry struct {
 	Operator      string `json:"operator" dynamodbav:"operator"`
 	Action        string `json:"action,omitempty" dynamodbav:"action,omitempty"`
 	TargetCluster string `json:"target_cluster,omitempty" dynamodbav:"targetCluster,omitempty"`
+	SourceIP      string `json:"source_ip,omitempty" dynamodbav:"sourceIp,omitempty"`
+	RequestID     string `json:"request_id,omitempty" dynamodbav:"requestId,omitempty"`
+	UserAgent     string `json:"user_agent,omitempty" dynamodbav:"userAgent,omitempty"`
 	Jira          string `json:"jira,omitempty" dynamodbav:"jira,omitempty"`
 	Force         bool   `json:"force,omitempty" dynamodbav:"force,omitempty"`
 	DryRun        bool   `json:"dry_run,omitempty" dynamodbav:"dryRun,omitempty"`

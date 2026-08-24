@@ -133,14 +133,14 @@ func runAction(ctx context.Context, global *GlobalOptions, opts *runOptions, act
 		if global.OutputFormat == output.FormatJSON {
 			return output.JSON(os.Stdout, resp)
 		}
-		fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.Target, tags)
+		fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.TargetCluster, tags)
 		if isAsync {
 			fmt.Fprintf(os.Stderr, "  dispatched (async) — use 'zoa get %s' or --wait to track\n", resp.ID)
 		}
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.Target, tags)
+	fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.TargetCluster, tags)
 
 	if isTerminalStatus(resp.Status) {
 		if resp.Output.String() != "" || resp.Logs != "" {

@@ -194,12 +194,7 @@ if requires_api; then
     $ZOA run get_resource --jira DEMO-030 --resource nodes --execution-mode async
   ASYNC_ID="$EXEC_ID"
 
-  run_cmd "Async — with --wait (deployments in argocd)" \
-    $ZOA run get_resource --jira DEMO-031 --namespace argocd --resource deployments --execution-mode async --wait
-
-  run_cmd "Async — AWS TA (list_eks_clusters)" \
-    $ZOA run list_eks_clusters --jira DEMO-032 --execution-mode async --wait
-
+  # One --wait call (~1min for the EventBridge reconciler tick).
   run_cmd "Async — write TA (rollout_restart, forced)" \
     $ZOA run rollout_restart --jira DEMO-033 --namespace kube-system --resource deployment --name coredns --execution-mode async --force --wait
 fi

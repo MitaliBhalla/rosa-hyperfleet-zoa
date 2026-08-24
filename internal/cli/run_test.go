@@ -138,7 +138,7 @@ func TestRunAction_WhenSyncSucceeds_ItShouldReturnNilError(t *testing.T) {
 			return &client.DispatchResponse{
 				ID:            "exec-sync-1",
 				Status:        "succeeded",
-				Target:        "mc-useast1-1",
+				TargetCluster: "mc-useast1-1",
 				ExecutionMode: "sync",
 			}, nil
 		},
@@ -170,7 +170,7 @@ func TestRunAction_WhenNoWait_ItShouldReturnImmediately(t *testing.T) {
 			return &client.DispatchResponse{
 				ID:            "exec-nowait",
 				Status:        "dispatched",
-				Target:        "mc-useast1-1",
+				TargetCluster: "mc-useast1-1",
 				ExecutionMode: "async",
 			}, nil
 		},
@@ -193,7 +193,7 @@ func TestRunAction_WhenNoWaitJSON_ItShouldReturnDispatchResponse(t *testing.T) {
 			return &client.DispatchResponse{
 				ID:            "exec-nowait-json",
 				Status:        "dispatched",
-				Target:        "mc-useast1-1",
+				TargetCluster: "mc-useast1-1",
 				ExecutionMode: "async",
 			}, nil
 		},
@@ -233,7 +233,7 @@ func TestRunAction_WhenSyncFails_ItShouldReturnError(t *testing.T) {
 			return &client.DispatchResponse{
 				ID:            "exec-fail",
 				Status:        "failed",
-				Target:        "mc-useast1-1",
+				TargetCluster: "mc-useast1-1",
 				ExecutionMode: "sync",
 			}, nil
 		},
