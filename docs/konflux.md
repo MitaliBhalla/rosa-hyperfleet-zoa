@@ -21,11 +21,3 @@ Release-data components `zoa-lambda` and `zoa-runner` are registered in [konflux
 | `zoa-lambda-on-pull-request` / `zoa-lambda-on-push` | `zoa-lambda` | `Containerfile`, `cmd/zoa-lambda/**`, shared Go paths |
 | `zoa-runner-on-pull-request` / `zoa-runner-on-push` | `zoa-runner` | `Containerfile.runner`, `cmd/zoa-runner/**`, `cmd/zoa/**`, shared Go paths |
 | `rosa-hyperfleet-zoa-on-pull-request` / `rosa-hyperfleet-zoa-on-push` | `rosa-hyperfleet-zoa` | All PRs / pushes (legacy; remove after cutover) |
-
-## Merge order
-
-1. ✅ [konflux-release-data MR !21738](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/merge_requests/21738) — register `zoa-lambda` + `zoa-runner` components
-2. **This PR** — add `.tekton/zoa-lambda-*` and `.tekton/zoa-runner-*` pipelines (keep legacy `rosa-hyperfleet-zoa-*` for now)
-3. `openshift/release` — add required checks `zoa-lambda-on-pull-request` and `zoa-runner-on-pull-request`
-4. Merge [PR #20](https://github.com/openshift-online/rosa-hyperfleet-zoa/pull/20) (Lambda re-architecture)
-5. Follow-up cleanup — remove legacy `rosa-hyperfleet-zoa` Tekton pipelines and release-data overlay
