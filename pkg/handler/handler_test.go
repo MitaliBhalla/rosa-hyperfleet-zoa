@@ -295,6 +295,64 @@ func TestHandleEvent_WhenHTTPEventWithBody_ItShouldParseCorrectly(t *testing.T) 
 	}
 }
 
+func TestHandleEvent_WhenExecutionAlreadySucceeded_ItShouldSkipDuplicate(t *testing.T) {
+	mockStore := &mockExecStore{
+		getResult: &store.Execution{
+			ID:            "exec-already-done",
+			Action:        "get_resource",
+			Status:        store.StatusSucceeded,
+			ExecutionMode: "sync",
+		},
+	}
+	l := New(Deps{
+		Cfg:       (&mockConfig{mode: "worker"}).toConfig(),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ExecStore: mockStore,
+	})
+	event := map[string]interface{}{
+		"route":        "execute",
+		"execution_id": "exec-already-done",
+	}
+	raw, _ := json.Marshal(event)
+	result, err := l.HandleEvent(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("expected nil error for idempotent skip, got: %v", err)
+	}
+	data, _ := json.Marshal(result)
+	if !contains(string(data), "ok") {
+		t.Errorf("expected ok status for skipped duplicate, got %s", data)
+	}
+}
+
+func TestHandleEvent_WhenExecutionAlreadyFailed_ItShouldSkipDuplicate(t *testing.T) {
+	mockStore := &mockExecStore{
+		getResult: &store.Execution{
+			ID:            "exec-already-failed",
+			Action:        "delete_pod",
+			Status:        store.StatusFailed,
+			ExecutionMode: "sync",
+		},
+	}
+	l := New(Deps{
+		Cfg:       (&mockConfig{mode: "worker"}).toConfig(),
+		Logger:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ExecStore: mockStore,
+	})
+	event := map[string]interface{}{
+		"route":        "execute",
+		"execution_id": "exec-already-failed",
+	}
+	raw, _ := json.Marshal(event)
+	result, err := l.HandleEvent(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("expected nil error for idempotent skip, got: %v", err)
+	}
+	data, _ := json.Marshal(result)
+	if !contains(string(data), "ok") {
+		t.Errorf("expected ok status for skipped duplicate, got %s", data)
+	}
+}
+
 func contains(s, substr string) bool {
 	return len(s) > 0 && len(substr) > 0 && (s == substr || len(s) > len(substr) && (indexOfString(s, substr) >= 0))
 }

@@ -41,6 +41,13 @@ func (r *Reconciler) RunGC(ctx context.Context) error {
 			"GCErrors":   metrics.Count(phaseErrors),
 		},
 	)
+
+	// Returning an error causes the Lambda invocation to report failure, which
+	// surfaces as AWS CloudWatch Lambda Errors metric. This enables native AWS
+	// monitoring and alarms without requiring custom metric queries.
+	if phaseErrors > 0 {
+		return fmt.Errorf("GC completed with %d phase errors", phaseErrors)
+	}
 	return nil
 }
 

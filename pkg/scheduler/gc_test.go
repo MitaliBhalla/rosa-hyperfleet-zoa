@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -218,5 +219,26 @@ func TestRunGC_WhenCalled_ItShouldExecuteGCPhases(t *testing.T) {
 	err := r.RunGC(ctx)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunGC_WhenTerminalQueryFails_ItShouldReturnError(t *testing.T) {
+	execStore := &mockExecutionStore{
+		terminalErr:  fmt.Errorf("dynamodb timeout"),
+		getResponses: map[string]*store.Execution{},
+	}
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	ctx := context.Background()
+	cfg := testConfig()
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.JobsNamespace}}
+	_, _ = kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	exec := executor.New(kubeClient, nil, nil, nil, executor.ExecutorConfig{}, noopLogger())
+	r := NewReconciler(execStore, kubeClient, nil, exec, cfg, noopLogger())
+
+	err := r.RunGC(ctx)
+	if err == nil {
+		t.Fatal("expected error when GC phase fails")
 	}
 }

@@ -27,6 +27,8 @@ type mockExecutionStore struct {
 	transitions  []transitionRecord
 	cleaned      []string
 	getResponses map[string]*store.Execution
+	queryErr     error
+	terminalErr  error
 }
 
 type transitionRecord struct {
@@ -108,6 +110,9 @@ func (m *mockExecutionStore) CountActiveByTarget(_ context.Context, _ string) (i
 }
 
 func (m *mockExecutionStore) QueryByTargetAndStatus(_ context.Context, target string, status store.Status) ([]*store.Execution, error) {
+	if m.queryErr != nil {
+		return nil, m.queryErr
+	}
 	var result []*store.Execution
 	for _, e := range m.executions {
 		if e.TargetCluster == target && e.Status == status {
@@ -118,6 +123,9 @@ func (m *mockExecutionStore) QueryByTargetAndStatus(_ context.Context, target st
 }
 
 func (m *mockExecutionStore) QueryTerminalByTarget(_ context.Context, target string, _ time.Duration) ([]*store.Execution, error) {
+	if m.terminalErr != nil {
+		return nil, m.terminalErr
+	}
 	var result []*store.Execution
 	for _, e := range m.executions {
 		if e.TargetCluster == target && e.Status.IsTerminal() && !e.Cleaned {
@@ -790,4 +798,62 @@ func TestPollAsyncJobs_WhenJobCompletedWithTarGz_ItShouldDetectFormat(t *testing
 	if tr.Metadata["outputFormat"] != "tar.gz" {
 		t.Errorf("expected outputFormat='tar.gz', got %v", tr.Metadata["outputFormat"])
 	}
+}
+
+func TestRun_WhenDispatchPhaseFails_ItShouldReturnError(t *testing.T) {
+	execStore := &mockExecutionStore{
+		queryErr:     fmt.Errorf("dynamodb throttled"),
+		getResponses: map[string]*store.Execution{},
+	}
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	ctx := context.Background()
+	cfg := testConfig()
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.JobsNamespace}}
+	_, _ = kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	exec := executor.New(kubeClient, nil, nil, nil, executor.ExecutorConfig{}, noopLogger())
+	r := NewReconciler(execStore, kubeClient, nil, exec, cfg, noopLogger())
+
+	err := r.Run(ctx)
+	if err == nil {
+		t.Fatal("expected error when dispatch phase fails")
+	}
+	if !contains(err.Error(), "phase errors") {
+		t.Errorf("expected 'phase errors' in error message, got: %v", err)
+	}
+}
+
+func TestRun_WhenNoPhaseFails_ItShouldReturnNil(t *testing.T) {
+	execStore := &mockExecutionStore{
+		executions:   []*store.Execution{},
+		getResponses: map[string]*store.Execution{},
+	}
+	kubeClient := fake.NewSimpleClientset() //nolint:staticcheck // NewClientset requires generated apply configs
+	ctx := context.Background()
+	cfg := testConfig()
+
+	ns := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: cfg.JobsNamespace}}
+	_, _ = kubeClient.CoreV1().Namespaces().Create(ctx, ns, metav1.CreateOptions{})
+
+	exec := executor.New(kubeClient, nil, nil, nil, executor.ExecutorConfig{}, noopLogger())
+	r := NewReconciler(execStore, kubeClient, nil, exec, cfg, noopLogger())
+
+	err := r.Run(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && len(substr) > 0 && indexOfSubstring(s, substr) >= 0
+}
+
+func indexOfSubstring(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return i
+		}
+	}
+	return -1
 }

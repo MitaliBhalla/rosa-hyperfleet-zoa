@@ -269,6 +269,15 @@ func (l *Lambda) runDispatchedExecution(ctx context.Context, executionID string)
 		return fmt.Errorf("execution %s not found in store", executionID)
 	}
 
+	// Idempotency guard: Lambda async invocations retry on failure (up to 2x).
+	// Without this check, a retry after a successful execution but failed state
+	// transition would re-execute the TA, causing duplicate side effects.
+	if exec.Status != store.StatusDispatched {
+		l.logger.Info("execution already progressed past dispatched, skipping duplicate invocation",
+			"execution_id", executionID, "current_status", exec.Status)
+		return nil
+	}
+
 	action, ok := actions.Get(exec.Action)
 	if !ok {
 		_ = l.execStore.TransitionWithMetadata(ctx, executionID, store.StatusDispatched, store.StatusFailed,
@@ -310,7 +319,11 @@ func (l *Lambda) runDispatchedExecution(ctx context.Context, executionID string)
 		"durationMs":  durationMs,
 	}
 
-	_ = l.execStore.TransitionWithMetadata(ctx, executionID, store.StatusDispatched, finalStatus, updates)
+	if err := l.execStore.TransitionWithMetadata(ctx, executionID, store.StatusDispatched, finalStatus, updates); err != nil {
+		l.logger.Error("failed to persist terminal state — Lambda retry will re-check via idempotency guard",
+			"execution_id", executionID, "target_status", finalStatus, "error", err)
+		return fmt.Errorf("persisting execution result: %w", err)
+	}
 	return execErr
 }
 

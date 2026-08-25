@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -105,6 +106,13 @@ func (r *Reconciler) Run(ctx context.Context) error {
 			"ReconcilerErrors":   metrics.Count(phaseErrors),
 		},
 	)
+
+	// Returning an error causes the Lambda invocation to report failure, which
+	// surfaces as AWS CloudWatch Lambda Errors metric. This enables native AWS
+	// monitoring and alarms without requiring custom metric queries.
+	if phaseErrors > 0 {
+		return fmt.Errorf("reconciler completed with %d phase errors", phaseErrors)
+	}
 	return nil
 }
 
@@ -153,6 +161,9 @@ func (r *Reconciler) dispatchApproved(ctx context.Context) error {
 		})
 		if err != nil {
 			r.logger.Error("failed to marshal execution event", "execution_id", exec.ID, "error", err)
+			if rbErr := r.executionStore.TransitionStatus(ctx, exec.ID, store.StatusDispatched, store.StatusApproved); rbErr != nil {
+				r.logger.Error("failed to rollback after marshal failure", "execution_id", exec.ID, "error", rbErr)
+			}
 			failures++
 			continue
 		}
