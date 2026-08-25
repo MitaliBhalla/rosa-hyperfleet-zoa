@@ -1,7 +1,10 @@
 # Binaries
 bin/
+hack/tools/bin/
 dist/
 /zoa
+/zoa-lambda
+/zoa-runner
 *.exe
 *.dll
 *.so
@@ -36,3 +39,6 @@ Thumbs.db
 
 # Temporary files
 tmp/
+
+# ZOA CLI output files
+zoa-*-output.json

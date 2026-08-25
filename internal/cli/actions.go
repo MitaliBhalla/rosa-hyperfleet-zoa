@@ -52,7 +52,7 @@ func newDescribeCommand(global *GlobalOptions) *cobra.Command {
 }
 
 func listActions(ctx context.Context, global *GlobalOptions) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}
@@ -67,15 +67,15 @@ func listActions(ctx context.Context, global *GlobalOptions) error {
 	}
 
 	tw := output.NewTable(os.Stdout)
-	fmt.Fprintf(tw, "NAME\tSCOPE\tTYPE\tDESCRIPTION\n")
+	fmt.Fprintf(tw, "NAME\tSCOPE\tTYPE\tMODE\tDESCRIPTION\n")
 	for _, a := range list.Items {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", a.Name, a.Scope, a.Type, a.Description)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", a.Name, a.Scope, a.Type, output.Dash(a.ExecutionMode), a.Description)
 	}
 	return tw.Flush()
 }
 
 func describeAction(ctx context.Context, global *GlobalOptions, name string) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}
@@ -92,22 +92,22 @@ func describeAction(ctx context.Context, global *GlobalOptions, name string) err
 	fmt.Printf("NAME:        %s\n", action.Name)
 	fmt.Printf("SCOPE:       %s\n", action.Scope)
 	fmt.Printf("TYPE:        %s\n", action.Type)
+	fmt.Printf("MODE:        %s\n", output.Dash(action.ExecutionMode))
 	fmt.Printf("DESCRIPTION: %s\n", action.Description)
 	fmt.Printf("APPROVAL:    %s\n", output.Dash(action.Authorization.Approval))
 
 	if action.WriteCooldownSeconds > 0 {
 		fmt.Printf("COOLDOWN:    %ds\n", action.WriteCooldownSeconds)
 	}
+	if action.TimeoutSeconds > 0 {
+		fmt.Printf("TIMEOUT:     %ds\n", action.TimeoutSeconds)
+	}
 	if action.DryRunAction != "" {
 		fmt.Printf("DRY-RUN:     %s\n", action.DryRunAction)
 	}
 
-	if len(action.RequiredFields) > 0 {
-		fmt.Printf("\nREQUIRED FIELDS:\n")
-		for _, f := range action.RequiredFields {
-			fmt.Printf("  %s\n", f)
-		}
-	}
+	fmt.Printf("\nREQUIRED FIELDS:\n")
+	fmt.Printf("  jira\n")
 
 	if len(action.Params) > 0 {
 		fmt.Printf("\nPARAMETERS:\n")

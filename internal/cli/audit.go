@@ -18,6 +18,8 @@ type auditOptions struct {
 	operator string
 	method   string
 	approval string
+	force    bool
+	dryRun   bool
 	since    string
 	limit    int
 }
@@ -46,6 +48,12 @@ func newAuditCommand(global *GlobalOptions) *cobra.Command {
   # Filter by approval state
   zoa audit --approval not_required --since 7d
 
+  # Show only forced operations (safety override audit)
+  zoa audit --force --since 7d
+
+  # Show only dry-run operations
+  zoa audit --dry-run --since 24h
+
   # Max history (up to 200 entries)
   zoa audit --limit 200 --since 7d
 
@@ -64,6 +72,8 @@ func newAuditCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.operator, "operator", "", "Filter by operator")
 	cmd.Flags().StringVar(&opts.method, "method", "", "Filter by HTTP method (GET|POST)")
 	cmd.Flags().StringVar(&opts.approval, "approval", "", "Filter by approval state")
+	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced operations")
+	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Show only dry-run operations")
 	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results (max 200)")
 
@@ -71,7 +81,7 @@ func newAuditCommand(global *GlobalOptions) *cobra.Command {
 }
 
 func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}
@@ -91,6 +101,12 @@ func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) e
 	}
 	if opts.approval != "" {
 		query.Set("approval_state", opts.approval)
+	}
+	if opts.force {
+		query.Set("force", "true")
+	}
+	if opts.dryRun {
+		query.Set("dry_run", "true")
 	}
 	if opts.since != "" {
 		query.Set("since", opts.since)
@@ -113,8 +129,13 @@ func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) e
 		return nil
 	}
 
-	fmt.Fprintf(os.Stdout, "%-19s  %-6s  %-4s  %-12s  %-25s  %-20s  %-14s  %-14s  %-36s  %s\n",
-		"TIMESTAMP", "METHOD", "CODE", "OPERATOR", "ACTION", "TARGET", "JIRA", "APPROVAL", "EXEC_ID", "PATH")
+	type row struct {
+		ts, method, operator, action, target, sourceIP, userAgent, jira, approval, execID, path string
+		code                                                                                    int
+	}
+
+	rows := make([]row, 0, len(list.Items))
+	maxAction, maxTarget, maxIP, maxUA, maxJira := 6, 6, 9, 10, 4
 
 	for _, e := range list.Items {
 		ts := e.Timestamp
@@ -122,19 +143,71 @@ func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) e
 			ts = strings.Replace(ts[:19], "T", " ", 1)
 		}
 
-		path := strings.TrimPrefix(output.Dash(e.Path), "/api/v0/trusted-actions/")
+		actionStr := output.Dash(e.Action)
+		if e.DryRun {
+			actionStr += " [DRY]"
+		}
+		if e.Force {
+			actionStr += " [FORCED]"
+		}
 
-		fmt.Fprintf(os.Stdout, "%-19s  %-6s  %-4d  %-12s  %-25s  %-20s  %-14s  %-14s  %-36s  %s\n",
-			ts,
-			e.Method,
-			e.StatusCode,
-			output.Truncate(output.Dash(e.Operator), 12),
-			output.Truncate(output.Dash(e.Action), 25),
-			output.Truncate(output.Dash(e.TargetCluster), 20),
-			output.Truncate(output.Dash(e.Jira), 14),
-			output.Truncate(output.Dash(e.ApprovalState), 14),
-			output.Dash(e.ExecutionID),
-			path,
+		if len(actionStr) > maxAction {
+			maxAction = len(actionStr)
+		}
+		target := output.Dash(e.TargetCluster)
+		if len(target) > maxTarget {
+			maxTarget = len(target)
+		}
+		jira := output.Dash(e.Jira)
+		if len(jira) > maxJira {
+			maxJira = len(jira)
+		}
+		sourceIP := output.Dash(e.SourceIP)
+		if len(sourceIP) > maxIP {
+			maxIP = len(sourceIP)
+		}
+		userAgent := output.Dash(e.UserAgent)
+		if len(userAgent) > maxUA {
+			maxUA = len(userAgent)
+		}
+
+		rows = append(rows, row{
+			ts:        ts,
+			method:    e.Method,
+			code:      e.StatusCode,
+			operator:  output.ShortOperator(e.Operator),
+			action:    actionStr,
+			target:    target,
+			sourceIP:  sourceIP,
+			userAgent: userAgent,
+			jira:      jira,
+			approval:  output.Dash(e.ApprovalState),
+			execID:    output.Dash(e.ExecutionID),
+			path:      strings.TrimPrefix(output.Dash(e.Path), "/api/v0/trusted-actions/"),
+		})
+	}
+
+	fmtStr := fmt.Sprintf("%%-19s  %%-6s  %%-4s  %%-12s  %%-%ds  %%-%ds  %%-%ds  %%-%ds  %%-%ds  %%-14s  %%-36s  %%s\n",
+		maxAction, maxTarget, maxIP, maxUA, maxJira)
+	fmt.Fprintf(os.Stdout, fmtStr,
+		"TIMESTAMP", "METHOD", "CODE", "OPERATOR", "ACTION", "TARGET", "SOURCE_IP", "USER_AGENT", "JIRA", "APPROVAL", "EXEC_ID", "PATH")
+
+	fmtRow := fmt.Sprintf("%%-19s  %%-6s  %%-4d  %%-12s  %%-%ds  %%-%ds  %%-%ds  %%-%ds  %%-%ds  %%-14s  %%-36s  %%s\n",
+		maxAction, maxTarget, maxIP, maxUA, maxJira)
+	for _, r := range rows {
+		fmt.Fprintf(os.Stdout, fmtRow,
+			r.ts,
+			r.method,
+			r.code,
+			output.Truncate(r.operator, 12),
+			r.action,
+			r.target,
+			r.sourceIP,
+			output.Truncate(r.userAgent, 20),
+			r.jira,
+			r.approval,
+			r.execID,
+			r.path,
 		)
 	}
 

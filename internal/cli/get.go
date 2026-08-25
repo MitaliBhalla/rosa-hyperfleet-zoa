@@ -5,14 +5,17 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/openshift-online/rosa-hyperfleet-zoa/internal/client"
 	"github.com/openshift-online/rosa-hyperfleet-zoa/internal/output"
 )
 
 func newGetCommand(global *GlobalOptions) *cobra.Command {
-	var includeOutput, includeLogs, includeAll bool
+	var includeOutput, includeLogs, includeAll, wait bool
+	var waitTimeout, waitPollInterval time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "get <execution-id>",
@@ -23,11 +26,11 @@ func newGetCommand(global *GlobalOptions) *cobra.Command {
   # Include the TA output
   zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d --include-output
 
-  # Include execution logs (stderr/debug logs)
-  zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d --include-logs
+  # Wait for a running execution to finish, then show output
+  zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d --wait --include-output
 
-  # Include everything (output + logs)
-  zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d --include-all
+  # Reconnect after a dropped connection
+  zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d --wait --wait-timeout 3m --include-all
 
   # JSON output for scripting
   zoa get fa65418c-f4eb-4f5c-8314-baaeb695ba7d -o json`,
@@ -37,56 +40,131 @@ func newGetCommand(global *GlobalOptions) *cobra.Command {
 				includeOutput = true
 				includeLogs = true
 			}
-			return getExecution(cmd.Context(), global, args[0], includeOutput, includeLogs)
+			return getExecution(cmd.Context(), global, args[0], getOpts{
+				includeOutput:    includeOutput,
+				includeLogs:      includeLogs,
+				wait:             wait,
+				waitTimeout:      waitTimeout,
+				waitPollInterval: waitPollInterval,
+			})
 		},
 	}
 
 	cmd.Flags().BoolVar(&includeOutput, "include-output", false, "Include execution output")
 	cmd.Flags().BoolVar(&includeLogs, "include-logs", false, "Include execution logs")
 	cmd.Flags().BoolVar(&includeAll, "include-all", false, "Include output + logs")
+	cmd.Flags().BoolVar(&wait, "wait", false, "Poll until execution reaches terminal status (useful to reconnect)")
+	cmd.Flags().DurationVar(&waitTimeout, "wait-timeout", 5*time.Minute, "Max poll duration when --wait is active")
+	cmd.Flags().DurationVar(&waitPollInterval, "wait-poll-interval", 30*time.Second, "Poll frequency when --wait is active")
 
 	return cmd
 }
 
-func getExecution(ctx context.Context, global *GlobalOptions, id string, includeOutput, includeLogs bool) error {
-	c, err := newClient(global)
+type getOpts struct {
+	includeOutput    bool
+	includeLogs      bool
+	wait             bool
+	waitTimeout      time.Duration
+	waitPollInterval time.Duration
+}
+
+func getExecution(ctx context.Context, global *GlobalOptions, id string, opts getOpts) error {
+	c, err := getClient(global)
 	if err != nil {
 		return err
+	}
+
+	exec, err := c.GetExecution(ctx, id, "")
+	if err != nil {
+		return err
+	}
+
+	if opts.wait && !isTerminalStatus(exec.Status) {
+		result, pollErr := poll(ctx, c, id, pollConfig{
+			interval: opts.waitPollInterval,
+			timeout:  opts.waitTimeout,
+		})
+		if pollErr != nil {
+			return pollErr
+		}
+		exec = result
 	}
 
 	include := ""
-	if includeOutput && includeLogs {
+	if opts.includeOutput && opts.includeLogs {
 		include = "output,logs"
-	} else if includeOutput {
+	} else if opts.includeOutput {
 		include = "output"
-	} else if includeLogs {
+	} else if opts.includeLogs {
 		include = "logs"
 	}
+	if include != "" && isTerminalStatus(exec.Status) {
+		full, fullErr := c.GetExecution(ctx, id, include)
+		if fullErr == nil {
+			exec = full
+		}
+	}
 
-	exec, err := c.GetExecution(ctx, id, include)
+	// Auto-download if server returned a hint instead of actual output
+	if opts.includeOutput && isDownloadHint(exec.Output.String()) {
+		outPath := fmt.Sprintf("zoa-%s-output.json", id)
+		fmt.Fprintf(os.Stderr, "Output too large for terminal — downloading to %s\n", outPath)
+		if err := autoDownload(ctx, c, id, outPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Auto-download failed: %v (use 'zoa download %s' manually)\n", err, id)
+		} else {
+			exec.Output = "" // Clear hint so renderExecution doesn't print it
+			fmt.Fprintf(os.Stderr, "Saved → %s\n", outPath)
+		}
+	}
+
+	return renderExecution(global, exec, opts)
+}
+
+const downloadHintPrefix = "use 'zoa download'"
+
+func isDownloadHint(s string) bool {
+	return strings.Contains(s, downloadHintPrefix)
+}
+
+func autoDownload(ctx context.Context, c APIClient, id, outPath string) error {
+	resp, err := c.RawGet(ctx, fmt.Sprintf("/trusted-actions/runs/%s/output", id))
 	if err != nil {
 		return err
 	}
+	defer resp.Body.Close()
 
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.ReadFrom(resp.Body)
+	return err
+}
+
+func renderExecution(global *GlobalOptions, exec *client.Execution, opts getOpts) error {
 	if global.OutputFormat == output.FormatJSON {
 		return output.JSON(os.Stdout, exec)
 	}
 
-	// Human-readable key-value output
 	fmt.Printf("ID:        %s\n", exec.ID)
-	actionStr := exec.Action
-	if exec.DryRun && exec.ExecutedAction != "" {
-		actionStr += fmt.Sprintf(" (dry-run → %s)", exec.ExecutedAction)
+	fmt.Printf("ACTION:    %s\n", exec.Action)
+	if exec.RequestedAction != "" {
+		fmt.Printf("REQUESTED: %s\n", exec.RequestedAction)
 	}
-	fmt.Printf("ACTION:    %s\n", actionStr)
 	fmt.Printf("TARGET:    %s\n", exec.TargetCluster)
 	fmt.Printf("STATUS:    %s\n", exec.Status)
-	fmt.Printf("APPROVAL:  %s\n", output.Dash(exec.ApprovalState))
-	fmt.Printf("OUTPUT:    %s\n", output.Dash(exec.OutputStatus))
+	fmt.Printf("MODE:      %s\n", output.Dash(exec.ExecutionMode))
 	fmt.Printf("DRY-RUN:   %s\n", output.FormatBool(exec.DryRun))
 	fmt.Printf("FORCE:     %s\n", output.FormatBool(exec.Force))
 	fmt.Printf("JIRA:      %s\n", output.Dash(exec.Jira))
-	fmt.Printf("OPERATOR:  %s\n", output.Dash(exec.Operator))
+	fmt.Printf("OPERATOR:  %s\n", output.ShortOperator(exec.Operator))
+	fmt.Printf("REVISION:  %s\n", output.Dash(exec.Revision))
 	if len(exec.Params) > 0 {
 		parts := make([]string, 0, len(exec.Params))
 		for k, v := range exec.Params {
@@ -98,13 +176,13 @@ func getExecution(ctx context.Context, global *GlobalOptions, id string, include
 	}
 	fmt.Printf("CREATED:   %s\n", output.FormatTimestamp(exec.CreatedAt))
 	fmt.Printf("COMPLETED: %s\n", output.FormatTimestamp(exec.CompletedAt))
-	fmt.Printf("DURATION:  %s\n", output.FormatDuration(exec.DurationSeconds))
+	fmt.Printf("DURATION:  %s\n", output.FormatDuration(exec.DurationMs))
 
-	if includeOutput && exec.Output.String() != "" {
+	if opts.includeOutput && exec.Output.String() != "" {
 		fmt.Println("---")
 		output.PrintTAOutput(os.Stdout, exec.Output.String())
 	}
-	if includeLogs && exec.Logs != "" {
+	if opts.includeLogs && exec.Logs != "" {
 		fmt.Println("---")
 		fmt.Print(exec.Logs)
 	}

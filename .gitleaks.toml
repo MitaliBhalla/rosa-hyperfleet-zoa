@@ -12,4 +12,6 @@
 
   paths = [
     '''internal/client/client_test\.go''',
+    '''pkg/executor/dispatch_test\.go''',
+    '''pkg/executor/helpers_test\.go''',
   ]

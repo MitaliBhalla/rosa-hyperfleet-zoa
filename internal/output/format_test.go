@@ -16,6 +16,9 @@ func TestParseFormat(t *testing.T) {
 		{"json", FormatJSON},
 		{"JSON", FormatJSON},
 		{"Json", FormatJSON},
+		{"wide", FormatWide},
+		{"WIDE", FormatWide},
+		{"Wide", FormatWide},
 		{"table", FormatTable},
 		{"TABLE", FormatTable},
 		{"", FormatTable},
@@ -35,21 +38,49 @@ func TestParseFormat(t *testing.T) {
 func TestFormatDuration(t *testing.T) {
 	tests := []struct {
 		name     string
-		seconds  *int
+		ms       *int64
 		expected string
 	}{
 		{"nil", nil, "-"},
-		{"zero", intPtr(0), "-"},
-		{"seconds only", intPtr(45), "45s"},
-		{"minutes and seconds", intPtr(125), "2m5s"},
-		{"hours and minutes", intPtr(3700), "1h1m"},
+		{"zero ms", int64Ptr(0), "0ms"},
+		{"sub-second", int64Ptr(258), "258ms"},
+		{"exactly 1s", int64Ptr(1000), "1.0s"},
+		{"1.2 seconds", int64Ptr(1200), "1.2s"},
+		{"45 seconds", int64Ptr(45000), "45.0s"},
+		{"2 minutes 5 seconds", int64Ptr(125000), "2m5s"},
+		{"1 hour 1 minute", int64Ptr(3700000), "1h1m"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := FormatDuration(tt.seconds)
+			got := FormatDuration(tt.ms)
 			if got != tt.expected {
-				t.Errorf("FormatDuration(%v) = %q, want %q", tt.seconds, got, tt.expected)
+				t.Errorf("FormatDuration(%v) = %q, want %q", tt.ms, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestFormatBytes(t *testing.T) {
+	tests := []struct {
+		name     string
+		bytes    *int64
+		expected string
+	}{
+		{"nil", nil, "-"},
+		{"zero", int64Ptr(0), "0B"},
+		{"small bytes", int64Ptr(847), "847B"},
+		{"1KB boundary", int64Ptr(1024), "1.0K"},
+		{"kilobytes", int64Ptr(2150), "2.1K"},
+		{"1MB boundary", int64Ptr(1024 * 1024), "1.0M"},
+		{"megabytes", int64Ptr(12_582_912), "12.0M"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FormatBytes(tt.bytes)
+			if got != tt.expected {
+				t.Errorf("FormatBytes(%v) = %q, want %q", tt.bytes, got, tt.expected)
 			}
 		})
 	}
@@ -193,13 +224,26 @@ func TestPrintTAOutput(t *testing.T) {
 		}
 	})
 
-	t.Run("When terminal with JSON array it should pretty-print", func(t *testing.T) {
+	t.Run("When terminal with flat JSON array it should render as table", func(t *testing.T) {
 		var buf bytes.Buffer
-		input := `[{"name":"a"},{"name":"b"}]`
+		input := `[{"name":"pod-1","status":"Running"},{"name":"pod-2","status":"Pending"}]`
+		printTAOutputWithTerminal(&buf, input, true)
+		out := buf.String()
+		if !strings.Contains(out, "NAME") || !strings.Contains(out, "STATUS") {
+			t.Errorf("flat array should render as table with headers, got:\n%s", out)
+		}
+		if !strings.Contains(out, "pod-1") || !strings.Contains(out, "pod-2") {
+			t.Errorf("table should contain row data, got:\n%s", out)
+		}
+	})
+
+	t.Run("When terminal with nested JSON array it should pretty-print", func(t *testing.T) {
+		var buf bytes.Buffer
+		input := `[{"name":"a","spec":{"replicas":3}},{"name":"b","spec":{"replicas":1}}]`
 		printTAOutputWithTerminal(&buf, input, true)
 		out := buf.String()
 		if !strings.Contains(out, "  ") {
-			t.Errorf("should be indented, got:\n%s", out)
+			t.Errorf("nested array should be indented/pretty-printed, got:\n%s", out)
 		}
 	})
 
@@ -304,6 +348,77 @@ func TestJsonKeysOrdered(t *testing.T) {
 	})
 }
 
-func intPtr(i int) *int {
+func int64Ptr(i int64) *int64 {
 	return &i
+}
+
+// --- ShortOperator tests ---
+
+func TestShortOperator_WhenEmpty_ItShouldReturnDash(t *testing.T) {
+	if got := ShortOperator(""); got != "-" {
+		t.Errorf("ShortOperator('') = %q, want '-'", got)
+	}
+}
+
+func TestShortOperator_WhenAssumedRole_ItShouldReturnSessionName(t *testing.T) {
+	arn := "arn:aws:sts::123456:assumed-role/sre-role/session-name"
+	if got := ShortOperator(arn); got != "session-name" {
+		t.Errorf("ShortOperator(%q) = %q, want 'session-name'", arn, got)
+	}
+}
+
+func TestShortOperator_WhenUserARN_ItShouldReturnFull(t *testing.T) {
+	arn := "arn:aws:iam::123456:user/admin"
+	if got := ShortOperator(arn); got != arn {
+		t.Errorf("ShortOperator(%q) = %q, want full ARN", arn, got)
+	}
+}
+
+func TestShortOperator_WhenAssumedRoleNoSlash_ItShouldReturnFull(t *testing.T) {
+	arn := "arn:aws:sts::123456:assumed-role"
+	if got := ShortOperator(arn); got != arn {
+		t.Errorf("ShortOperator(%q) = %q, want full ARN (no trailing slash)", arn, got)
+	}
+}
+
+// --- PrintTAOutput tests ---
+
+func TestPrintTAOutput_WhenNonTerminal_SingleObject_ItShouldPrintJSON(t *testing.T) {
+	var buf bytes.Buffer
+	printTAOutputWithTerminal(&buf, `{"name":"pod-1","status":"Running"}`, false)
+	output := buf.String()
+	if output == "" {
+		t.Error("expected non-empty output")
+	}
+	if !strings.Contains(output, "pod-1") {
+		t.Errorf("expected output to contain 'pod-1', got %q", output)
+	}
+}
+
+func TestPrintTAOutput_WhenEmpty_ItShouldProduceNoOutput(t *testing.T) {
+	var buf bytes.Buffer
+	printTAOutputWithTerminal(&buf, "", false)
+	if buf.Len() != 0 {
+		t.Errorf("expected empty output, got %q", buf.String())
+	}
+}
+
+func TestPrintTAOutput_WhenNonTerminal_Array_ItShouldPrintAll(t *testing.T) {
+	var buf bytes.Buffer
+	input := `[{"name":"a"},{"name":"b"}]`
+	printTAOutputWithTerminal(&buf, input, false)
+	output := buf.String()
+	if !strings.Contains(output, "a") || !strings.Contains(output, "b") {
+		t.Errorf("expected both objects, got %q", output)
+	}
+}
+
+func TestPrintTAOutput_WhenTerminal_Object_ItShouldRenderTable(t *testing.T) {
+	var buf bytes.Buffer
+	input := `[{"name":"pod-1","namespace":"default","status":"Running"}]`
+	printTAOutputWithTerminal(&buf, input, true)
+	output := buf.String()
+	if !strings.Contains(output, "pod-1") {
+		t.Errorf("expected table to contain 'pod-1', got %q", output)
+	}
 }

@@ -14,6 +14,7 @@ type Format string
 
 const (
 	FormatTable Format = "table"
+	FormatWide  Format = "wide"
 	FormatJSON  Format = "json"
 )
 
@@ -21,6 +22,8 @@ func ParseFormat(s string) Format {
 	switch strings.ToLower(s) {
 	case "json":
 		return FormatJSON
+	case "wide":
+		return FormatWide
 	default:
 		return FormatTable
 	}
@@ -36,18 +39,21 @@ func NewTable(w io.Writer) *tabwriter.Writer {
 	return tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
 }
 
-func FormatDuration(seconds *int) string {
-	if seconds == nil || *seconds == 0 {
+func FormatDuration(ms *int64) string {
+	if ms == nil {
 		return "-"
 	}
-	s := *seconds
-	if s < 60 {
-		return fmt.Sprintf("%ds", s)
+	m := *ms
+	switch {
+	case m < 1000:
+		return fmt.Sprintf("%dms", m)
+	case m < 60_000:
+		return fmt.Sprintf("%.1fs", float64(m)/1000)
+	case m < 3_600_000:
+		return fmt.Sprintf("%dm%ds", m/60_000, (m%60_000)/1000)
+	default:
+		return fmt.Sprintf("%dh%dm", m/3_600_000, (m%3_600_000)/60_000)
 	}
-	if s < 3600 {
-		return fmt.Sprintf("%dm%ds", s/60, s%60)
-	}
-	return fmt.Sprintf("%dh%dm", s/3600, (s%3600)/60)
 }
 
 func FormatTimestamp(t *time.Time) string {
@@ -64,11 +70,41 @@ func FormatBool(b bool) string {
 	return "no"
 }
 
+func FormatBytes(b *int64) string {
+	if b == nil {
+		return "-"
+	}
+	n := *b
+	switch {
+	case n == 0:
+		return "0B"
+	case n < 1024:
+		return fmt.Sprintf("%dB", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1fK", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1fM", float64(n)/(1024*1024))
+	}
+}
+
 func Dash(s string) string {
 	if s == "" {
 		return "-"
 	}
 	return s
+}
+
+// ShortOperator extracts the session name from an AWS ARN or returns the
+// input unchanged if it's not an assumed-role ARN.
+// "arn:aws:sts::123:assumed-role/RoleName/slopezma" → "slopezma"
+func ShortOperator(arn string) string {
+	if arn == "" {
+		return "-"
+	}
+	if i := strings.LastIndex(arn, "/"); i >= 0 && strings.Contains(arn, "assumed-role") {
+		return arn[i+1:]
+	}
+	return arn
 }
 
 func Truncate(s string, max int) string {
@@ -127,10 +163,39 @@ func printTAOutputWithTerminal(w io.Writer, raw string, terminal bool) {
 		return
 	}
 
-	// Not flat JSONL — try as single JSON object/array (verbose TA output) → pretty-print
+	// Try JSON array of flat objects → render as table (Table API output)
 	trimmed := strings.TrimSpace(raw)
-	if (strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}")) ||
-		(strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]")) {
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		if rows, keys := parseJSONArray(trimmed); rows != nil {
+			renderTable(w, rows, keys)
+			return
+		}
+	}
+
+	// Single flat JSON object → render as key-value pairs (single resource get)
+	if strings.HasPrefix(trimmed, "{") && strings.HasSuffix(trimmed, "}") {
+		keys := jsonKeysOrdered(trimmed)
+		if len(keys) > 0 {
+			var obj map[string]any
+			if err := json.Unmarshal([]byte(trimmed), &obj); err == nil && isFlatObject(obj) {
+				for _, k := range keys {
+					fmt.Fprintf(w, "%-14s %v\n", strings.ToUpper(k)+":", obj[k])
+				}
+				return
+			}
+		}
+		// Nested object (verbose) → pretty-print
+		var parsed any
+		if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
+			enc := json.NewEncoder(w)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(parsed)
+			return
+		}
+	}
+
+	// Nested array (verbose list) → pretty-print
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
 		var parsed any
 		if err := json.Unmarshal([]byte(trimmed), &parsed); err == nil {
 			enc := json.NewEncoder(w)
@@ -145,6 +210,56 @@ func printTAOutputWithTerminal(w io.Writer, raw string, terminal bool) {
 	if !strings.HasSuffix(raw, "\n") {
 		fmt.Fprintln(w)
 	}
+}
+
+// parseJSONArray parses a JSON array string. If all elements are flat objects,
+// returns them with keys in the order they appear in the first element's JSON.
+func parseJSONArray(raw string) ([]map[string]any, []string) {
+	// Extract key order from first object in the array
+	idx := strings.Index(raw, "{")
+	if idx < 0 {
+		return nil, nil
+	}
+	closeBrace := strings.Index(raw[idx:], "}")
+	if closeBrace < 0 {
+		return nil, nil
+	}
+	firstObj := raw[idx : idx+closeBrace+1]
+	keys := jsonKeysOrdered(firstObj)
+	if len(keys) == 0 {
+		return nil, nil
+	}
+
+	var arr []map[string]any
+	if err := json.Unmarshal([]byte(raw), &arr); err != nil {
+		return nil, nil
+	}
+	if len(arr) == 0 {
+		return nil, nil
+	}
+	for _, obj := range arr {
+		if !isFlatObject(obj) {
+			return nil, nil
+		}
+	}
+	return arr, keys
+}
+
+func renderTable(w io.Writer, rows []map[string]any, keys []string) {
+	tw := NewTable(w)
+	header := make([]string, len(keys))
+	for i, k := range keys {
+		header[i] = strings.ToUpper(k)
+	}
+	fmt.Fprintln(tw, strings.Join(header, "\t"))
+	for _, row := range rows {
+		vals := make([]string, len(keys))
+		for i, k := range keys {
+			vals[i] = fmt.Sprintf("%v", row[k])
+		}
+		fmt.Fprintln(tw, strings.Join(vals, "\t"))
+	}
+	tw.Flush()
 }
 
 // parseJSONL checks if all lines are flat JSON objects (scalar values only).

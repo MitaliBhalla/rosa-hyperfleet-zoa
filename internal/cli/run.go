@@ -14,18 +14,22 @@ import (
 )
 
 type runOptions struct {
-	target    string
-	namespace string
-	allNS     bool
-	selector  string
-	verbose   bool
-	name      string
-	resource  string
-	jira      string
-	force     bool
-	dryRun    bool
-	noWait    bool
-	params    []string
+	namespace     string
+	allNS         bool
+	selector      string
+	verbose       bool
+	name          string
+	resource      string
+	jira          string
+	force         bool
+	dryRun        bool
+	noWait        bool
+	wait          bool
+	waitTimeout   time.Duration
+	pollInterval  time.Duration
+	timeout       time.Duration
+	executionMode string
+	params        []string
 }
 
 func newRunCommand(global *GlobalOptions) *cobra.Command {
@@ -36,50 +40,46 @@ func newRunCommand(global *GlobalOptions) *cobra.Command {
 		Short: "Execute a Trusted Action",
 		Long: `Dispatch a Trusted Action against a target cluster and wait for completion.
 
+The target cluster is determined by the Lambda endpoint (ZOA_API_URL). Each Lambda
+serves exactly one EKS cluster — set ZOA_API_URL to point at the right one.
+
 The result (stdout of the TA script) is printed to stdout on success.
 On failure, logs are printed to stderr. Use --no-wait to fire and forget.`,
 		Example: `  # Basic read action
-  zoa run get_nodes -t mc-useast1-1 --jira ROSAENG-1234
-
-  # Namespaced with label selector (dedicated flag)
-  zoa run get_pods -t mc-useast1-1 -n cert-manager -l app=cert-manager --jira ROSAENG-1234
-
-  # Same as above using generic --param
-  zoa run get_pods -t mc-useast1-1 -n cert-manager --param label_selector=app=cert-manager --jira ROSAENG-1234
+  zoa run get_resource --resource pods -n cert-manager --jira ROSAENG-1234
 
   # All namespaces with verbose JSON, piped to jq
-  zoa run get_pods -t mc-useast1-1 -A -v --jira ROSAENG-1234 | jq '.[] | select(.status != "Running")'
-
-  # Custom parameters (field selector)
-  zoa run get_events -t mc-useast1-1 -n cert-manager --param field_selector=reason=BackOff --jira ROSAENG-1234
-
-  # Verbose output (full JSON from the action instead of compact summary)
-  zoa run get_deployments -t mc-useast1-1 -n cert-manager -v --jira ROSAENG-1234
-
-  # Generic resource query (any Kubernetes resource type)
-  zoa run get_resource -t mc-useast1-1 --resource deployments -A --jira ROSAENG-1234
+  zoa run get_resource --resource pods -A -v --jira ROSAENG-1234 | jq '.[] | select(.status != "Running")'
 
   # Write action
-  zoa run rollout_restart -t mc-useast1-1 -n cert-manager --name cert-manager-webhook --jira ROSAENG-1234
+  zoa run rollout_restart --resource deployment -n cert-manager --name cert-manager-webhook --jira ROSAENG-1234
 
   # Write action with force (bypass cooldown and concurrency limits)
-  zoa run rollout_restart -t mc-useast1-1 -n cert-manager --name cert-manager-webhook --jira ROSAENG-1234 --force
+  zoa run rollout_restart --resource deployment -n cert-manager --name cert-manager-webhook --jira ROSAENG-1234 --force
 
   # Dry run (executes the dry_run_action variant, no side effects)
-  zoa run delete_pod -t mc-useast1-1 -n cert-manager --name cert-manager-webhook-abc123 --jira ROSAENG-1234 --dry-run
+  zoa run delete_pod -n cert-manager --name cert-manager-webhook-abc123 --jira ROSAENG-1234 --dry-run
 
   # Destructive action
-  zoa run delete_pod -t mc-useast1-1 -n cert-manager --name cert-manager-webhook-abc123 --jira ROSAENG-1234
+  zoa run delete_pod -n cert-manager --name cert-manager-webhook-abc123 --jira ROSAENG-1234
 
   # Fire and forget (don't wait for completion)
-  zoa run get_nodes -t mc-useast1-1 --jira ROSAENG-1234 --no-wait -o json`,
-		Args: cobra.ExactArgs(1),
+  zoa run get_resource --resource nodes --jira ROSAENG-1234 --no-wait -o json`,
+		Args: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("missing action name\n\n  Usage: zoa run <action> --jira <ticket>\n  Run 'zoa actions' to see available actions")
+			}
+			if len(args) > 1 {
+				return fmt.Errorf("unexpected argument %q — action parameters must be passed as flags\n\n  Example: zoa run %s --resource %s --jira <ticket>\n  Run 'zoa describe %s' to see available parameters",
+					args[1], args[0], args[1], args[0])
+			}
+			return nil
+		},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAction(cmd.Context(), global, opts, args[0])
 		},
 	}
 
-	cmd.Flags().StringVarP(&opts.target, "target", "t", "", "Target cluster (required)")
 	cmd.Flags().StringVarP(&opts.namespace, "namespace", "n", "", "Namespace")
 	cmd.Flags().BoolVarP(&opts.allNS, "all-namespaces", "A", false, "All namespaces")
 	cmd.Flags().StringVarP(&opts.selector, "selector", "l", "", "Label selector")
@@ -89,17 +89,21 @@ On failure, logs are printed to stderr. Use --no-wait to fire and forget.`,
 	cmd.Flags().StringVar(&opts.jira, "jira", "", "Jira ticket (required, e.g. ROSAENG-1234)")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Bypass write cooldown and concurrency limits")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Execute dry-run variant of the action")
-	cmd.Flags().BoolVar(&opts.noWait, "no-wait", false, "Don't wait for completion")
+	cmd.Flags().BoolVar(&opts.noWait, "no-wait", false, "Return ID immediately, skip output display (sync: skips output fetch; async: already default)")
+	cmd.Flags().BoolVar(&opts.wait, "wait", false, "Poll until async execution completes (no effect on sync — sync returns inline)")
+	cmd.Flags().DurationVar(&opts.waitTimeout, "wait-timeout", 5*time.Minute, "Max poll duration when --wait is active")
+	cmd.Flags().DurationVar(&opts.pollInterval, "wait-poll-interval", 30*time.Second, "Poll frequency when --wait is active")
+	cmd.Flags().DurationVar(&opts.timeout, "timeout", 0, "Server-side TA execution timeout (e.g. 60s, 3m; bounded by server max 295s)")
+	cmd.Flags().StringVar(&opts.executionMode, "execution-mode", "", "Override execution class: 'sync' or 'async' (default: TA's declared class)")
 	cmd.Flags().StringArrayVar(&opts.params, "param", nil, "Additional parameters (key=value, repeatable)")
 
-	_ = cmd.MarkFlagRequired("target")
 	_ = cmd.MarkFlagRequired("jira")
 
 	return cmd
 }
 
 func runAction(ctx context.Context, global *GlobalOptions, opts *runOptions, action string) error {
-	c, err := newClient(global)
+	c, err := getClient(global)
 	if err != nil {
 		return err
 	}
@@ -107,11 +111,12 @@ func runAction(ctx context.Context, global *GlobalOptions, opts *runOptions, act
 	params := buildParams(opts)
 
 	req := &client.DispatchRequest{
-		TargetCluster: opts.target,
-		Jira:          opts.jira,
-		Params:        params,
-		Force:         opts.force,
-		DryRun:        opts.dryRun,
+		Jira:           opts.jira,
+		Params:         params,
+		Force:          opts.force,
+		DryRun:         opts.dryRun,
+		ExecutionMode:  opts.executionMode,
+		TimeoutSeconds: int(opts.timeout.Seconds()),
 	}
 
 	resp, err := c.Dispatch(ctx, action, req)
@@ -121,17 +126,54 @@ func runAction(ctx context.Context, global *GlobalOptions, opts *runOptions, act
 
 	tags := formatTags(action, resp.ExecutedAction, opts.force, opts.dryRun)
 
-	if opts.noWait {
+	isAsync := resp.ExecutionMode == "async"
+	fireAndForget := opts.noWait || (isAsync && !opts.wait)
+
+	if fireAndForget {
 		if global.OutputFormat == output.FormatJSON {
 			return output.JSON(os.Stdout, resp)
 		}
-		fmt.Fprintf(os.Stderr, "✓ %s%s\n", resp.ID, tags)
+		fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.TargetCluster, tags)
+		if isAsync {
+			fmt.Fprintf(os.Stderr, "  dispatched (async) — use 'zoa get %s' or --wait to track\n", resp.ID)
+		}
 		return nil
 	}
 
-	fmt.Fprintf(os.Stderr, "✓ %s%s\n", resp.ID, tags)
+	fmt.Fprintf(os.Stderr, "✓ %s [%s]%s\n", resp.ID, resp.TargetCluster, tags)
 
-	result, err := poll(ctx, c, resp.ID)
+	if isTerminalStatus(resp.Status) {
+		if resp.Output.String() != "" || resp.Logs != "" {
+			exec := &client.Execution{
+				ID:            resp.ID,
+				Status:        resp.Status,
+				ExecutionMode: resp.ExecutionMode,
+				DurationMs:    resp.DurationMs,
+				Output:        resp.Output,
+				Logs:          resp.Logs,
+			}
+			return printRunResult(global, exec)
+		}
+		include := "output"
+		if resp.Status != "succeeded" {
+			include = "logs"
+		}
+		full, err := c.GetExecution(ctx, resp.ID, include)
+		if err != nil {
+			full = &client.Execution{ID: resp.ID, Status: resp.Status}
+		}
+		return printRunResult(global, full)
+	}
+
+	// Only async with --wait reaches here; sync always returns terminal status inline.
+	if !isAsync {
+		return fmt.Errorf("unexpected non-terminal status %q from sync execution %s (server bug)", resp.Status, resp.ID)
+	}
+
+	result, err := poll(ctx, c, resp.ID, pollConfig{
+		interval: opts.pollInterval,
+		timeout:  opts.waitTimeout,
+	})
 	if err != nil {
 		return err
 	}
@@ -139,9 +181,20 @@ func runAction(ctx context.Context, global *GlobalOptions, opts *runOptions, act
 	return printRunResult(global, result)
 }
 
-func poll(ctx context.Context, c *client.Client, id string) (*client.Execution, error) {
-	const interval = 5 * time.Second
-	const timeout = 120 * time.Second
+func isTerminalStatus(status string) bool {
+	switch status {
+	case "succeeded", "failed", "timed_out", "rejected":
+		return true
+	}
+	return false
+}
+
+type pollConfig struct {
+	interval time.Duration
+	timeout  time.Duration
+}
+
+func poll(ctx context.Context, c APIClient, id string, cfg pollConfig) (*client.Execution, error) {
 	start := time.Now()
 
 	for {
@@ -150,29 +203,21 @@ func poll(ctx context.Context, c *client.Client, id string) (*client.Execution, 
 			return nil, fmt.Errorf("polling execution: %w", err)
 		}
 
-		switch exec.Status {
-		case "succeeded", "failed", "error", "timed_out":
+		if isTerminalStatus(exec.Status) {
 			fmt.Fprintf(os.Stderr, "\r\033[K")
-			// Fetch full result with output/logs based on status
-			include := ""
-			if exec.OutputStatus == "uploaded" {
-				if exec.Status == "succeeded" {
-					include = "output"
-				} else {
-					include = "logs"
-				}
+			include := "output"
+			if exec.Status != "succeeded" {
+				include = "logs"
 			}
-			if include != "" {
-				full, err := c.GetExecution(ctx, id, include)
-				if err == nil {
-					return full, nil
-				}
+			full, err := c.GetExecution(ctx, id, include)
+			if err == nil {
+				return full, nil
 			}
 			return exec, nil
 		}
 
 		elapsed := time.Since(start)
-		if elapsed >= timeout {
+		if elapsed >= cfg.timeout {
 			fmt.Fprintf(os.Stderr, "\r\033[K")
 			return exec, fmt.Errorf("timed out after %s (status: %s)", elapsed.Round(time.Second), exec.Status)
 		}
@@ -184,34 +229,16 @@ func poll(ctx context.Context, c *client.Client, id string) (*client.Execution, 
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
-		case <-time.After(interval):
+		case <-time.After(cfg.interval):
 		}
 	}
 }
 
 func printRunResult(global *GlobalOptions, exec *client.Execution) error {
-	runnerS := 0
-	uploadS := 0
-	totalS := 0
-	if exec.RunnerSeconds != nil {
-		runnerS = *exec.RunnerSeconds
-	}
-	if exec.UploadSeconds != nil {
-		uploadS = *exec.UploadSeconds
-	}
-	if exec.DurationSeconds != nil {
-		totalS = *exec.DurationSeconds
-	}
-	dispatchS := totalS - runnerS - uploadS
-
-	timing := fmt.Sprintf("%ds total · runner %ds · upload %ds · dispatch %ds", totalS, runnerS, uploadS, dispatchS)
+	timing := fmt.Sprintf("%s · mode=%s", output.FormatDuration(exec.DurationMs), exec.ExecutionMode)
 
 	if exec.Status == "succeeded" {
-		if exec.OutputStatus == "failed" {
-			fmt.Fprintf(os.Stderr, "✓ %s ⚠ output upload failed\n", timing)
-		} else {
-			fmt.Fprintf(os.Stderr, "✓ %s\n", timing)
-		}
+		fmt.Fprintf(os.Stderr, "✓ %s\n", timing)
 
 		if global.OutputFormat == output.FormatJSON {
 			return output.JSON(os.Stdout, exec)
@@ -224,11 +251,7 @@ func printRunResult(global *GlobalOptions, exec *client.Execution) error {
 	}
 
 	// Failed execution
-	if exec.OutputStatus == "failed" {
-		fmt.Fprintf(os.Stderr, "✗ %s · %s ⚠ output upload failed\n", exec.Status, timing)
-	} else {
-		fmt.Fprintf(os.Stderr, "✗ %s · %s\n", exec.Status, timing)
-	}
+	fmt.Fprintf(os.Stderr, "✗ %s · %s\n", exec.Status, timing)
 	if exec.Logs != "" {
 		fmt.Fprint(os.Stderr, exec.Logs)
 	}

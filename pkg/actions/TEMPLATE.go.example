@@ -1,0 +1,111 @@
+// Copy this file as your_action_name.go, fill in the sections marked TODO.
+// The file is self-contained: metadata, RBAC, validation, and execution in one place.
+// Auto-registered via init() — no need to edit any other file.
+
+package actions
+
+import (
+	"context"
+	"fmt"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// TODO: Register your action. This auto-registers it at startup.
+func init() {
+	Register(&myAction{})
+}
+
+type myAction struct{}
+
+// Metadata defines everything the Lambda + dispatcher needs to know about this TA:
+// name, permissions, timeouts, approval requirements, dry-run behavior.
+func (a *myAction) Metadata() ActionMetadata {
+	return ActionMetadata{
+		// TODO: Unique action name (snake_case, matches CLI: `zoa run my_action`)
+		Name: "my_action",
+
+		// Execution layer: "kube-api" (kubectl operations) or "aws-api" (AWS SDK calls)
+		Scope: "kube-api",
+
+		// Mutation level: "read" (no changes) or "write" (creates/modifies/deletes)
+		Type: "read",
+
+		// Human-readable description (shown in `zoa describe my_action`)
+		Description: "Describe what this TA does in one sentence.",
+
+		// Approval: "none" (immediate), "1-peer", "2-peers", "2-seniors"
+		Authorization: AuthorizationConfig{Approval: "none"},
+
+		// Per-TA timeout (seconds). Runner Job is killed after this.
+		TimeoutSeconds: 300,
+
+		// Write-only: cooldown between consecutive writes to same target (seconds)
+		// WriteCooldownSeconds: 60,
+
+		// Write-only: substitute read action used when dry_run=true
+		// DryRunAction: "get_resource",
+
+		// Parameters accepted by this TA. Shown in `zoa describe my_action`.
+		Parameters: []ParameterDef{
+			{Name: "namespace", Required: true, Description: "Target namespace"},
+			{Name: "name", Required: true, Description: "Resource name"},
+			{Name: "verbose", Default: "false", Description: "Full JSON output"},
+		},
+
+		// K8s RBAC created for this execution. Minimal permissions only.
+		RBAC: &RBACConfig{
+			// ClusterScoped: true for cluster-wide access, false for namespace-scoped
+			ClusterScoped: false,
+			// NamespaceParam: which param contains the target namespace (for ns-scoped RBAC)
+			NamespaceParam: "namespace",
+			Rules: []RBACRule{
+				{APIGroups: []string{""}, Resources: []string{"pods"}, Verbs: []string{"get", "list"}},
+			},
+		},
+	}
+}
+
+// Validate checks params and preconditions BEFORE execution starts.
+// Return an error to reject the request (400 to caller).
+func (a *myAction) Validate(ctx context.Context, params *ExecutionParams) error {
+	// Auto-check required params from metadata
+	if err := ValidateRequiredParams(a.Metadata(), params.Params); err != nil {
+		return err
+	}
+
+	// TODO: Add action-specific validation (resource exists, safe to operate, etc.)
+	ns := params.Params["namespace"]
+	name := params.Params["name"]
+
+	_, err := params.KubeClient.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("pod %s/%s not found: %w", ns, name, err)
+	}
+
+	return nil
+}
+
+// Execute performs the actual TA logic. Runs with scoped RBAC inside a K8s Job.
+func (a *myAction) Execute(ctx context.Context, params *ExecutionParams) (*ActionResult, error) {
+	ns := params.Params["namespace"]
+	name := params.Params["name"]
+
+	params.Logger.Info("executing my_action", "namespace", ns, "name", name)
+
+	// TODO: Your logic here — kubectl get, delete, patch, etc.
+	pod, err := params.KubeClient.CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get pod: %w", err)
+	}
+
+	return &ActionResult{
+		Success: true,
+		Output: map[string]interface{}{
+			"name":      pod.Name,
+			"namespace": pod.Namespace,
+			"phase":     pod.Status.Phase,
+		},
+		Summary: fmt.Sprintf("Retrieved pod %s/%s (phase: %s)", ns, name, pod.Status.Phase),
+	}, nil
+}

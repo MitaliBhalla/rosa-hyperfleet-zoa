@@ -4,82 +4,69 @@ This file provides guidance to AI coding assistants when working with this repos
 
 ## Project Overview
 
-**rosa-hyperfleet-zoa** is the Zero Operator Access (ZOA) CLI, tooling, and Trusted Action definitions repository for the ROSA HCP Hyperfleet platform. ZOA ensures operators have no persistent, interactive, or unaudited access to customer infrastructure — all operational actions are executed through pre-defined, audited Trusted Actions via the Platform API.
+**rosa-hyperfleet-zoa** is a serverless Zero Operator Access (ZOA) implementation for the ROSA HCP Hyperfleet platform. It contains the API server, Lambda execution engine, CLI, and all Trusted Action implementations. ZOA ensures operators have no persistent, interactive, or unaudited access to customer infrastructure — all operational actions execute through pre-defined, audited Trusted Actions.
 
-**Tech stack**: Go 1.25, Cobra, AWS SDK v2 (SigV4), OpenShift CI (Prow + ci-operator)
+**Tech stack**: Go 1.26, Cobra, AWS SDK v2, AWS Lambda, DynamoDB, S3, EventBridge, Kubernetes client-go
 
-**Key Goals:**
+## Architecture
 
-- **Zero standing access**: Operators interact exclusively through the audited API
-- **Least-privilege execution**: Per-execution RBAC scoped to exactly what the TA declares
-- **Immutable audit trail**: Every action logged with caller identity, target, jira, and duration
-- **Defense-in-depth**: API-level secrets protection, write cooldowns, three-layer timeout model
+ZOA deploys **2 Lambda functions per target VPC** (same binary, `HANDLER_MODE` env var), with failure domain isolation per cluster:
 
-## Architecture Overview
+- **API Lambda** — Function URL with native Go streaming, handles CLI requests, sync TA execution
+- **Worker Lambda** — EventBridge-triggered, handles reconciler, GC, async TA execution via self-invocation
 
-This repo provides the operator-facing tooling for the ZOA system:
+Per-VPC deployment means a failure in one cluster's ZOA cannot cascade to another. The entire data path (Lambda, DynamoDB, S3, EventBridge, KMS) is serverless with zero persistent compute.
 
-1. **ZOA CLI** (`cmd/zoa/`) — Go CLI that authenticates via SigV4 and calls the Platform API
-2. **zoa-tools image** (`Containerfile` + `image/`) — Container image with runner/uploader entrypoints used by TA Jobs on target clusters
-3. **Trusted Actions** (`trusted-actions/`) — Trusted Action definitions consumed by the platform repo at a pinned commit/hash
-
-The full execution flow: CLI → API Gateway → Platform API → DynamoDB + Maestro → ManifestWork → Job on target cluster → S3 output → CLI retrieves results.
+Execution flow: CLI → SigV4-signed HTTPS → API Lambda Function URL → DynamoDB + EKS + S3
 
 ## Key Directories
 
 | Path | Purpose |
 |------|---------|
-| `cmd/zoa/` | Binary entry point |
-| `internal/cli/` | Cobra CLI commands (run, get, runs, actions, describe, audit, logs) |
-| `internal/client/` | Platform API client (SigV4-signed HTTP requests) |
-| `internal/output/` | Output formatting (table, JSON — kubectl-style) |
-| `internal/version/` | Version info (injected via ldflags at build time) |
-| `trusted-actions/` | Trusted Action definitions (YAML: script, RBAC, params) |
-| `image/` | Runner and uploader entrypoint scripts baked into zoa-tools image |
-| `ci/` | CI scripts and Containerfile for OpenShift CI build root |
-| `Containerfile` | zoa-tools container image (kubectl + aws-cli + entrypoints) |
-
-## Key Technologies
-
-- **Language**: Go 1.25 (CLI + tests)
-- **CLI framework**: Cobra
-- **Authentication**: AWS SigV4 against regional API Gateway (via `API_URL` env var)
-- **Container image**: kubectl + aws-cli on minimal base
-- **Testing**: Go stdlib `testing` (unit tests), Ginkgo/Gomega (future integration/E2E)
-- **CI**: OpenShift CI (Prow + ci-operator)
-- **Linting**: golangci-lint v2.12+ (required, no fallback; config in `.golangci.yml`)
+| `cmd/zoa/` | CLI binary entry point |
+| `cmd/zoa-lambda/` | Lambda function entry point (api + worker modes) |
+| `cmd/zoa-runner/` | Async Job runner (K8s Job entrypoint) |
+| `internal/cli/` | Cobra commands + APIClient interface for testability |
+| `internal/client/` | SigV4-signed HTTP client (talks to Lambda Function URL) |
+| `internal/output/` | Table + JSON formatting |
+| `internal/eksauth/` | EKS token generation (presigned STS URL) |
+| `pkg/actions/` | Go TA framework: interface, registry, implementations, conformance tests |
+| `pkg/api/` | HTTP route handlers (dispatch, list, get, audit, version) |
+| `pkg/handler/` | Lambda event router (HTTP events, scheduled events, execution events) |
+| `pkg/executor/` | K8s SA/RBAC creation, sync execution (impersonation), async Job dispatch |
+| `pkg/store/` | DynamoDB persistence (ExecutionStore, AuditStore interfaces) |
+| `pkg/scheduler/` | Reconciler and GC (EventBridge-triggered worker tasks) |
+| `pkg/config/` | Env-var based configuration with per-mode validation |
+| `pkg/metrics/` | CloudWatch EMF metric emission |
+| `Containerfile` | Lambda container image (UBI-minimal + zoa-lambda) |
+| `Containerfile.runner` | Async runner image (UBI9 + zoa-runner + zoa CLI) |
 
 ## Build & Test Commands
 
 ```bash
-make all          # Run all checks and build (fmt, vet, lint, test, build)
-make build        # Build ./bin/zoa (injects version, commit, build date)
-make install      # Install zoa to GOPATH/bin
-make test         # Unit tests (go test -v -race -coverprofile)
-make verify       # fmt-check + vet + lint (CI-safe, read-only)
-make fmt          # Format Go code (gofmt -w -s)
-make fmt-check    # Check formatting (read-only, fails if unformatted)
-make vet          # Run go vet for suspicious code
-make lint         # Run golangci-lint (errors if not installed)
-make tidy         # Tidy go modules (go mod tidy)
-make clean        # Remove build artifacts and coverage files
-make image        # Build zoa-tools multi-arch container image
-make image-push   # Build and push manifest list to registry
-make image-clean  # Remove built container images
-make help         # Show all available targets
+make all              # verify → test → build
+make build            # Build bin/zoa (CLI only)
+make test             # Unit tests (go test -race -coverprofile)
+make lint             # golangci-lint
+make verify           # fmt-check + vet + lint (CI-safe, read-only)
+make fmt              # Format code
+make image            # Build zoa-lambda container image
+make image-runner     # Build zoa-runner container image
+make image-push       # Build + push zoa-lambda (latest + git commit tag)
+make image-push-runner # Build + push zoa-runner (latest + git commit tag)
 ```
 
 ## Important Context
 
-- **SigV4 authentication**: All API calls are signed with AWS SigV4 against the regional API Gateway
-- **Environment**: Set `API_URL` to the regional API Gateway endpoint (e.g. `export API_URL="https://<id>.execute-api.<region>.amazonaws.com/prod"`)
-- **Versioning**: Semantic version from git tags, git commit, and build date injected via `-ldflags`
-- **Trusted Actions**: YAML files in `trusted-actions/` defining `name`, `scope`, `type`, `params`, `rbac`, `script` — consumed by the platform repo at a pinned commit/hash
-- **Security invariant**: TA templates must never request secrets access in `clusters-*` namespaces
-- **Two privilege scopes**: `kube-api` (Kubernetes operations, per-execution SA) and `aws-api` (AWS CLI, static SA with Pod Identity)
-- **Conventional commits**: Use `feat:`, `fix:`, `docs:`, `chore:` prefixes
-- **golangci-lint required**: Must be installed locally (`go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`)
-- **Architecture**: See README.md for the system diagram
+- **Environment**: Set `ZOA_API_URL` to the Lambda Function URL (not API Gateway)
+- **Trusted Actions**: Go packages in `pkg/actions/` implementing the `Action` interface, self-registering via `init()`
+- **Conformance gate**: `pkg/actions/conformance_test.go` enforces metadata, RBAC, naming, timeout, and test coverage on every PR
+- **Two execution modes**: sync (in-Lambda, ephemeral SA/RBAC) and async (K8s Job with STS Secret)
+- **Two scopes**: `kube-api` (K8s operations, per-execution SA impersonation) and `aws-api` (AWS operations, STS AssumeRole)
+- **Security invariant**: `get_secret` TA rejects access to HCP namespaces (`clusters-*`, `ocm-*`)
+- **Conventional commits**: Use `feat:`, `fix:`, `docs:`, `chore:`, `test:` prefixes
+- **Three-layer timeouts**: Lambda ceiling → code deadline (env var) → per-TA timeout (Go code)
+- **Architecture docs**: Live in `docs/` (self-contained), not in the hyperfleet repo
 
 ## Development Guidelines
 
@@ -87,38 +74,33 @@ make help         # Show all available targets
 
 - **Use the architect agent** for changes to Trusted Action RBAC patterns or security-sensitive code
 - **Use the code-reviewer agent** for CLI code quality review
+- **Use adversary agent** for security review of changes touching `pkg/executor/`, `pkg/api/`, or `pkg/actions/`
+
+### Testing
+
+- Use `"When ... it should ..."` format for test case names
+- Use interface mocks for AWS SDK clients (DynamoDBAPI, S3API in `pkg/store/`, `pkg/executor/`)
+- Use `k8s.io/client-go/kubernetes/fake` for K8s unit tests
+- Run `make test` before pushing (race detection enabled)
+- Conformance tests in `pkg/actions/conformance_test.go` are a PR gate
 
 ### Security Guidelines
 
-- **Never** access secrets in `clusters-*` namespaces from Trusted Actions
-- **Always** use least-privilege RBAC in Trusted Action `rbac` sections
-- **Never** hardcode credentials — use Pod Identity for AWS access, SigV4 for API auth
-- **Always** validate and sanitize params in Trusted Action scripts (`set -euo pipefail`)
-- **Never** log sensitive data (tokens, credentials, customer content) in Trusted Action scripts
+- **Never** access secrets in `clusters-*` or `ocm-*` namespaces from TAs
+- **Always** declare least-privilege RBAC in TA metadata
+- **Never** hardcode credentials — use STS AssumeRole for AWS, SA impersonation for K8s
+- **Never** log sensitive data (tokens, credentials, customer content)
 
 ### Trusted Action Conventions
 
-- Scope: `kube-api` (Kubernetes operations) or `aws-api` (AWS CLI operations)
-- Type: `read` (no cooldown) or `write` (cooldown enforced)
-- Script must write structured output to `/artifacts/output.json`
-- RBAC must follow least-privilege: only the verbs/resources the TA actually needs
-- `timeout_seconds` should be set appropriately (default: 1800s)
-
-### Developer Workflow
-
-- Run `make all` before pushing to ensure everything passes (format, vet, lint, test, build)
-- `make verify` runs the same read-only checks as CI (fmt-check, vet, lint)
-- `golangci-lint` is a hard requirement — install with: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2`
-
-### Formatting
-
-- Go: `gofmt -s` (no goimports dependency)
-- YAML: 2-space indentation
-- Conventional commits: `feat:`, `fix:`, `docs:`, `chore:` prefixes
+- Scope: `kube-api` (requires RBAC declaration) or `aws-api` (must NOT declare RBAC)
+- Type: `read` (no cooldown) or `write` (requires cooldown > 0 and DryRunAction)
+- Names: snake_case (enforced by conformance test)
+- Timeout: must not exceed `EXECUTION_DEADLINE_SECONDS` (default 295s)
+- Each TA must have a corresponding test file
 
 ## Related Repositories
 
 | Repository | What it contains |
 |---|---|
-| [rosa-hyperfleet](https://github.com/openshift-online/rosa-hyperfleet) | Terraform infra, Helm charts, ArgoCD deployment, CI runner |
-| [rosa-hyperfleet-api](https://github.com/openshift-online/rosa-hyperfleet-api) | Execution engine, REST API, reconciler, DynamoDB stores |
+| [rosa-hyperfleet](https://github.com/openshift-online/rosa-hyperfleet) | Terraform infra (Lambda, DynamoDB, S3, KMS, IAM, EventBridge), ArgoCD configs |
