@@ -50,7 +50,7 @@ To inspect output in the terminal, use 'zoa output' or 'zoa logs' instead.`,
 	return cmd
 }
 
-func resolveDownloadPath(opts *downloadOptions, executionID string) string {
+func resolveDownloadPath(opts *downloadOptions, executionID, contentType string) string {
 	if opts.file != "" {
 		return opts.file
 	}
@@ -58,7 +58,15 @@ func resolveDownloadPath(opts *downloadOptions, executionID string) string {
 	if opts.artifact == "logs" {
 		ext = "jsonl"
 	}
+	if contentType == "application/gzip" || contentType == "application/x-gzip" {
+		ext = "tar.gz"
+	}
 	return fmt.Sprintf("zoa-%s-%s.%s", executionID, opts.artifact, ext)
+}
+
+func isBinaryContentType(ct string) bool {
+	return ct == "application/gzip" || ct == "application/x-gzip" ||
+		ct == "application/octet-stream" || ct == "application/zip"
 }
 
 func streamToFile(url, outPath string) (int64, error) {
@@ -100,7 +108,8 @@ func downloadArtifact(ctx context.Context, global *GlobalOptions, opts *download
 		return fmt.Errorf("download failed: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	outPath := resolveDownloadPath(opts, executionID)
+	contentType := resp.Header.Get("Content-Type")
+	outPath := resolveDownloadPath(opts, executionID, contentType)
 
 	f, err := os.Create(outPath)
 	if err != nil {
@@ -113,8 +122,9 @@ func downloadArtifact(ctx context.Context, global *GlobalOptions, opts *download
 		return fmt.Errorf("streaming artifact: %w", err)
 	}
 
-	// Ensure file ends with newline so shell tools (cat, less) render cleanly
-	_, _ = f.Write([]byte("\n"))
+	if !isBinaryContentType(contentType) {
+		_, _ = f.Write([]byte("\n"))
+	}
 
 	fmt.Fprintf(os.Stderr, "Saved %s (%d bytes) → %s\n", opts.artifact, n, outPath)
 	return nil

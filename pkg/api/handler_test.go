@@ -578,6 +578,20 @@ func TestHandleCreate_WhenMissingAccountID_ItShouldReturn400(t *testing.T) {
 	}
 }
 
+func TestHandleCreate_WhenMissingJira_ItShouldReturn400(t *testing.T) {
+	h := testHandler(&mockExecStore{})
+
+	body := createRequest{
+		Params: map[string]string{"namespace": "default"},
+	}
+
+	rr := doRequest(h, "POST", "/api/v0/trusted-actions/test-read/run", body, defaultHeaders())
+
+	if rr.Code != http.StatusBadRequest {
+		t.Errorf("expected 400 for missing jira, got %d: %s", rr.Code, rr.Body.String())
+	}
+}
+
 func TestHandleCreate_WhenUnknownAction_ItShouldReturn404(t *testing.T) {
 	h := testHandler(&mockExecStore{})
 

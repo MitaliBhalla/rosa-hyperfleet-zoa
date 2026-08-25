@@ -105,7 +105,46 @@ func getExecution(ctx context.Context, global *GlobalOptions, id string, opts ge
 		}
 	}
 
+	// Auto-download if server returned a hint instead of actual output
+	if opts.includeOutput && isDownloadHint(exec.Output.String()) {
+		outPath := fmt.Sprintf("zoa-%s-output.json", id)
+		fmt.Fprintf(os.Stderr, "Output too large for terminal — downloading to %s\n", outPath)
+		if err := autoDownload(ctx, c, id, outPath); err != nil {
+			fmt.Fprintf(os.Stderr, "Auto-download failed: %v (use 'zoa download %s' manually)\n", err, id)
+		} else {
+			exec.Output = "" // Clear hint so renderExecution doesn't print it
+			fmt.Fprintf(os.Stderr, "Saved → %s\n", outPath)
+		}
+	}
+
 	return renderExecution(global, exec, opts)
+}
+
+const downloadHintPrefix = "use 'zoa download'"
+
+func isDownloadHint(s string) bool {
+	return strings.Contains(s, downloadHintPrefix)
+}
+
+func autoDownload(ctx context.Context, c APIClient, id, outPath string) error {
+	resp, err := c.RawGet(ctx, fmt.Sprintf("/trusted-actions/runs/%s/output", id))
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(outPath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	_, err = f.ReadFrom(resp.Body)
+	return err
 }
 
 func renderExecution(global *GlobalOptions, exec *client.Execution, opts getOpts) error {

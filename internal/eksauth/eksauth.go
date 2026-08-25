@@ -9,6 +9,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"net/http"
+	"sync"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
@@ -64,13 +66,31 @@ func NewRESTConfig(endpoint, caBase64, clusterName string, awsCfg aws.Config) (*
 	}, nil
 }
 
+// tokenCacheTTL is set to 9 minutes. EKS tokens are valid for up to 15 minutes
+// (X-Amz-Expires=600), so a 9-minute cache ensures tokens are never used after
+// ~60% of their lifetime — leaving margin for clock skew.
+const tokenCacheTTL = 9 * time.Minute
+
 // stsTokenSource generates EKS-compatible bearer tokens using STS GetCallerIdentity presigned URL.
+// Tokens are cached for tokenCacheTTL to avoid re-signing on every K8s API call.
 type stsTokenSource struct {
 	stsClient   *sts.Client
 	clusterName string
+
+	mu       sync.Mutex
+	cached   string
+	cachedAt time.Time
 }
 
 func (s *stsTokenSource) Token(ctx context.Context) (string, error) {
+	s.mu.Lock()
+	if s.cached != "" && time.Since(s.cachedAt) < tokenCacheTTL {
+		token := s.cached
+		s.mu.Unlock()
+		return token, nil
+	}
+	s.mu.Unlock()
+
 	presigner := sts.NewPresignClient(s.stsClient, func(opts *sts.PresignOptions) {
 		opts.ClientOptions = append(opts.ClientOptions, func(o *sts.Options) {
 			o.APIOptions = append(o.APIOptions, eksPresignMiddleware(s.clusterName))
@@ -83,15 +103,21 @@ func (s *stsTokenSource) Token(ctx context.Context) (string, error) {
 	}
 
 	token := tokenPrefix + base64.RawURLEncoding.EncodeToString([]byte(presigned.URL))
+
+	s.mu.Lock()
+	s.cached = token
+	s.cachedAt = time.Now()
+	s.mu.Unlock()
+
 	return token, nil
 }
 
-// eksPresignMiddleware injects the x-k8s-aws-id header and X-Amz-Expires=60
+// eksPresignMiddleware injects the x-k8s-aws-id header and X-Amz-Expires=600
 // query parameter into the STS presigned request. Both must be set before the
 // SigV4 signer computes the canonical request:
 //   - x-k8s-aws-id: cluster scope that EKS pins in the signature
-//   - X-Amz-Expires=60: required by aws-iam-authenticator (validates 0–900);
-//     the SDK's PresignHTTP intentionally omits it
+//   - X-Amz-Expires=600: STS token validity (10 min); tokens are cached for 9 min
+//     to ensure freshness while reducing STS API calls
 func eksPresignMiddleware(clusterName string) func(*middleware.Stack) error {
 	return func(stack *middleware.Stack) error {
 		return stack.Build.Add(middleware.BuildMiddlewareFunc("EKSPresign",
@@ -101,7 +127,7 @@ func eksPresignMiddleware(clusterName string) func(*middleware.Stack) error {
 				if req, ok := in.Request.(*smithyhttp.Request); ok {
 					req.Header.Set(clusterIDHeader, clusterName)
 					q := req.URL.Query()
-					q.Set("X-Amz-Expires", "60")
+					q.Set("X-Amz-Expires", "600")
 					req.URL.RawQuery = q.Encode()
 				}
 				return next.HandleBuild(ctx, in)

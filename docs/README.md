@@ -28,8 +28,6 @@ Implementation-level architecture docs live **in this repo** (`docs/architecture
 
 Cross-system design proposals (how ZOA fits into the broader platform) live in the [rosa-hyperfleet](https://github.com/openshift-online/rosa-hyperfleet) repo as ADRs. These are referenced below for historical context but are not the source of truth for implementation details.
 
-## External Design Documents (historical)
+## External Design Documents
 
-- [ZOA Architecture](https://github.com/openshift-online/rosa-hyperfleet/blob/main/docs/design/zoa-architecture.md) — original system overview
-- [ZOA Lambda Proposal](https://github.com/openshift-online/rosa-hyperfleet/blob/main/docs/design/zoa-lambda-architecture.md) — original design proposal
-- [ZOA Security Model](https://github.com/openshift-online/rosa-hyperfleet/blob/main/docs/design/zoa-security-model.md) — threat model
+- [ZOA Architecture](https://github.com/openshift-online/rosa-hyperfleet/blob/main/docs/design/zoa-architecture.md) — infrastructure architecture, Terraform context, and platform integration

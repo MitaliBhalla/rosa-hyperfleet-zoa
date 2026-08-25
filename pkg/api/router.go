@@ -132,14 +132,24 @@ func (h *Handler) handleGetExecutionRoute(w http.ResponseWriter, r *http.Request
 
 func (h *Handler) handleOutputRoute(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	h.recordAudit(r, http.StatusOK, "", id)
 	h.handleDownloadOutput(w, r, id, "output")
+	rw, ok := w.(*responseWriter)
+	statusCode := http.StatusOK
+	if ok {
+		statusCode = rw.statusCode
+	}
+	h.recordAudit(r, statusCode, "", id)
 }
 
 func (h *Handler) handleLogsRoute(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	h.recordAudit(r, http.StatusOK, "", id)
 	h.handleDownloadOutput(w, r, id, "logs")
+	rw, ok := w.(*responseWriter)
+	statusCode := http.StatusOK
+	if ok {
+		statusCode = rw.statusCode
+	}
+	h.recordAudit(r, statusCode, "", id)
 }
 
 func (h *Handler) handleDescribeActionRoute(w http.ResponseWriter, r *http.Request) {
@@ -181,12 +191,18 @@ func (h *Handler) handleGetExecution(w http.ResponseWriter, r *http.Request, id 
 	if include != "" && exec.Status.IsTerminal() {
 		includes := parseIncludes(include)
 		if includes["output"] {
-			data, _ := h.fetchArtifact(ctx, id, "output")
-			if len(data) > 0 && json.Valid(data) {
-				resp.Output = json.RawMessage(data)
-			} else if len(data) > 0 {
-				quoted, _ := json.Marshal(string(data))
-				resp.Output = json.RawMessage(quoted)
+			const maxInlineBytes = 10 << 20 // 10 MB
+			if exec.OutputFormat == "tar.gz" || (exec.OutputBytes > 0 && exec.OutputBytes > maxInlineBytes) {
+				hint := json.RawMessage(`"use 'zoa download' for large or binary artifacts"`)
+				resp.Output = hint
+			} else {
+				data, _ := h.fetchArtifact(ctx, id, "output")
+				if len(data) > 0 && json.Valid(data) {
+					resp.Output = json.RawMessage(data)
+				} else if len(data) > 0 {
+					quoted, _ := json.Marshal(string(data))
+					resp.Output = json.RawMessage(quoted)
+				}
 			}
 		}
 		if includes["logs"] {

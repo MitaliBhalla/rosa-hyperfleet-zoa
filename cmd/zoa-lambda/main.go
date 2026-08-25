@@ -6,7 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"strings"
+	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -28,21 +28,11 @@ import (
 	"github.com/openshift-online/rosa-hyperfleet-zoa/pkg/store"
 )
 
-func parseLogLevel(s string) slog.Level {
-	switch strings.ToLower(s) {
-	case "debug":
-		return slog.LevelDebug
-	case "warn", "warning":
-		return slog.LevelWarn
-	case "error":
-		return slog.LevelError
-	default:
-		return slog.LevelInfo
-	}
-}
-
 func main() {
-	logLevel := parseLogLevel(os.Getenv("LOG_LEVEL"))
+	var logLevel slog.Level
+	if err := logLevel.UnmarshalText([]byte(os.Getenv("LOG_LEVEL"))); err != nil {
+		logLevel = slog.LevelInfo
+	}
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel}))
 
 	cfg, err := config.Load()
@@ -51,6 +41,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	logger = logger.With("target", cfg.TargetCluster, "region", cfg.Region)
 	logger.Info("starting zoa-lambda",
 		"handler_mode", cfg.HandlerMode,
 		"reconciler_deadline_s", cfg.ReconcilerDeadlineSeconds,
@@ -58,7 +49,10 @@ func main() {
 		"max_batch_per_tick", cfg.MaxBatchPerTick,
 	)
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(cfg.Region))
+	initCtx, initCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer initCancel()
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(initCtx, awsconfig.WithRegion(cfg.Region))
 	if err != nil {
 		logger.Error("failed to load AWS config", "error", err)
 		os.Exit(1)
@@ -68,7 +62,7 @@ func main() {
 	// credentials that target the RC account's DynamoDB tables and S3 bucket.
 	dataStoreCfg := awsCfg
 	if cfg.DataStoreRoleARN != "" {
-		dataStoreCfg, err = awsconfig.LoadDefaultConfig(context.Background(),
+		dataStoreCfg, err = awsconfig.LoadDefaultConfig(initCtx,
 			awsconfig.WithRegion(cfg.Region),
 			awsconfig.WithCredentialsProvider(
 				stscreds.NewAssumeRoleProvider(
@@ -104,7 +98,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := handler.CheckStartupHealth(context.Background(), handler.HealthDeps{
+	if err := handler.CheckStartupHealth(initCtx, handler.HealthDeps{
 		DynamoClient: dynamoClient,
 		S3Client:     s3Client,
 		KubeClient:   kubeClient,
@@ -152,5 +146,9 @@ func main() {
 			Logger:     logger,
 		})
 		lambda.Start(h.HandleEvent)
+
+	default:
+		logger.Error("unknown handler mode — cannot start Lambda", "mode", cfg.HandlerMode)
+		os.Exit(1)
 	}
 }

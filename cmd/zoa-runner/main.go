@@ -32,18 +32,27 @@ const outputDir = "/output"
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
-	executionID := os.Getenv("EXECUTION_ID")
-	actionName := os.Getenv("ACTION")
-	bucket := os.Getenv("ARTIFACT_BUCKET")
-	s3Prefix := os.Getenv("S3_PREFIX")
-	region := os.Getenv("AWS_DEFAULT_REGION")
-
-	if executionID == "" || actionName == "" || bucket == "" || s3Prefix == "" {
-		logger.Error("missing required environment variables",
-			"EXECUTION_ID", executionID, "ACTION", actionName,
-			"ARTIFACT_BUCKET", bucket, "S3_PREFIX", s3Prefix)
+	required := map[string]string{
+		"EXECUTION_ID":    os.Getenv("EXECUTION_ID"),
+		"ACTION":          os.Getenv("ACTION"),
+		"ARTIFACT_BUCKET": os.Getenv("ARTIFACT_BUCKET"),
+		"S3_PREFIX":       os.Getenv("S3_PREFIX"),
+	}
+	var missing []string
+	for name, value := range required {
+		if value == "" {
+			missing = append(missing, name)
+		}
+	}
+	if len(missing) > 0 {
+		logger.Error("missing required environment variables", "missing", missing)
 		os.Exit(1)
 	}
+	executionID := required["EXECUTION_ID"]
+	actionName := required["ACTION"]
+	bucket := required["ARTIFACT_BUCKET"]
+	s3Prefix := required["S3_PREFIX"]
+	region := os.Getenv("AWS_DEFAULT_REGION")
 
 	logger = logger.With("execution_id", executionID, "action", actionName)
 	logger.Info("zoa-runner starting")
@@ -55,7 +64,7 @@ func main() {
 		os.Exit(2)
 	}
 
-	params := parseParams(os.Getenv("PARAMS"))
+	params := parseParams(os.Getenv("PARAMS"), logger)
 
 	if err := os.MkdirAll(outputDir, 0o755); err != nil {
 		logger.Error("failed to create output directory", "error", err)
@@ -158,6 +167,7 @@ func main() {
 	execLogger.Info("uploading artifacts to S3", "bucket", bucket, "prefix", s3Prefix)
 	if err := uploadArtifacts(bucket, s3Prefix, region, logger); err != nil {
 		execLogger.Error("S3 upload failed", "error", err)
+		writeExitStatus(1)
 		os.Exit(1)
 	}
 
@@ -220,13 +230,13 @@ func uploadArtifacts(bucket, prefix, region string, logger *slog.Logger) error {
 	return nil
 }
 
-func parseParams(raw string) map[string]string {
+func parseParams(raw string, logger *slog.Logger) map[string]string {
 	params := make(map[string]string)
 	if raw == "" {
 		return params
 	}
 	if err := json.Unmarshal([]byte(raw), &params); err != nil {
-		return params
+		logger.Error("failed to parse PARAMS env var as JSON", "error", err, "raw", raw)
 	}
 	return params
 }

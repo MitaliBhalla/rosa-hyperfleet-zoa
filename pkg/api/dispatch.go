@@ -63,9 +63,14 @@ func (h *Handler) handleCreate(w http.ResponseWriter, r *http.Request, actionNam
 		return
 	}
 
-	if req.Jira != "" && !jiraPattern.MatchString(req.Jira) {
+	if req.Jira == "" {
+		h.recordAudit(r, http.StatusBadRequest, actionName, "", withForce(req.Force), withDryRun(req.DryRun))
+		writeError(w, http.StatusBadRequest, "missing_jira", "jira ticket is required for all executions")
+		return
+	}
+	if !jiraPattern.MatchString(req.Jira) {
 		h.recordAudit(r, http.StatusBadRequest, actionName, "", withJira(req.Jira), withForce(req.Force), withDryRun(req.DryRun))
-		writeError(w, http.StatusBadRequest, "invalid-jira", fmt.Sprintf("jira ticket %q must match format PROJECT-123", req.Jira))
+		writeError(w, http.StatusBadRequest, "invalid_jira", fmt.Sprintf("jira ticket %q must match format PROJECT-123", req.Jira))
 		return
 	}
 

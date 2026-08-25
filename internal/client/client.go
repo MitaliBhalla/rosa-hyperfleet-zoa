@@ -88,8 +88,10 @@ func parseEndpoint(apiURL string) (region, service string, err error) {
 }
 
 func (c *Client) Dispatch(ctx context.Context, action string, req *DispatchRequest) (*DispatchResponse, error) {
+	// Sync TAs can run up to the Lambda deadline (~15min); use an extended client timeout.
+	longClient := c.WithTimeout(16 * time.Minute)
 	var resp DispatchResponse
-	if err := c.do(ctx, http.MethodPost, "/trusted-actions/"+url.PathEscape(action)+"/run", req, &resp); err != nil {
+	if err := longClient.do(ctx, http.MethodPost, "/trusted-actions/"+url.PathEscape(action)+"/run", req, &resp); err != nil {
 		return nil, err
 	}
 	return &resp, nil
@@ -159,31 +161,39 @@ func (c *Client) ServerVersion(ctx context.Context) (*ServerVersionInfo, error) 
 }
 
 // RawGet performs a signed GET request and returns the raw HTTP response.
-// Caller is responsible for closing resp.Body.
+// Caller is responsible for closing resp.Body. Uses a 10-minute timeout
+// as a safety net for large artifact downloads.
 func (c *Client) RawGet(ctx context.Context, path string) (*http.Response, error) {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	_ = cancel // caller owns resp.Body; context will be cancelled when resp.Body is closed or deferred
+
 	fullURL := c.baseURL + "/api/v0" + path
 
 	bodyReader := bytes.NewReader(nil)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, bodyReader)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
 	if c.signer != nil {
 		creds, err := c.credentials.Retrieve(ctx)
 		if err != nil {
+			cancel()
 			return nil, fmt.Errorf("retrieving AWS credentials: %w", err)
 		}
 
 		payloadHash := sha256Hash(bodyReader)
 		if err := c.signer.SignHTTP(ctx, creds, req, payloadHash, c.sigService, c.region, time.Now()); err != nil {
+			cancel()
 			return nil, fmt.Errorf("signing request: %w", err)
 		}
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
+		cancel()
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
 

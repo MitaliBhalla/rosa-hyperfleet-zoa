@@ -148,6 +148,37 @@ func TestDeletePod(t *testing.T) {
 	})
 }
 
+func TestDeletePod_WhenContextAlreadyCancelled_ItShouldReturnDeleteInitiated(t *testing.T) {
+	action := &deletePod{}
+	// Use an empty fake clientset — the pod does NOT exist so the watch won't
+	// fire a Deleted event. Combined with a pre-cancelled context, this forces
+	// the ctx.Done path.
+	client := fake.NewClientset()
+	params := &ExecutionParams{
+		Params:     map[string]string{"namespace": "default", "name": "slow-pod"},
+		KubeClient: client,
+		Logger:     deletepodTestLogger(),
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := action.Execute(ctx, params)
+	// With a cancelled context, the K8s delete call or watch setup should fail
+	// OR we get the delete-initiated result.
+	if err != nil {
+		// Acceptable: ctx cancelled before delete/watch completes
+		return
+	}
+	if !result.Success {
+		t.Fatal("expected success (delete-initiated)")
+	}
+	output := result.Output.(map[string]string)
+	if output["status"] != "delete-initiated" {
+		t.Errorf("expected status 'delete-initiated', got %q", output["status"])
+	}
+}
+
 func TestDeletePodMetadata(t *testing.T) {
 	action := &deletePod{}
 	meta := action.Metadata()

@@ -188,7 +188,7 @@ func (e *LambdaRuntimeError) Error() string {
 	switch e.ErrorType {
 	case "Runtime.ExitError":
 		return "ZOA API is unavailable (Lambda failed to start — check CloudWatch logs for startup health failures)"
-	case "Task timed out after", "Runtime.DeadlineExceeded":
+	case "Runtime.DeadlineExceeded":
 		return "ZOA API timed out (Lambda execution deadline exceeded)"
 	default:
 		if e.ErrorMessage != "" {

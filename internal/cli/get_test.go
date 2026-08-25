@@ -128,6 +128,20 @@ func TestGetExecution_WhenClientReturnsError_ItShouldPropagateError(t *testing.T
 	}
 }
 
+func TestIsDownloadHint_WhenHintReturned_ItShouldReturnTrue(t *testing.T) {
+	hint := `"use 'zoa download' for large or binary artifacts"`
+	if !isDownloadHint(hint) {
+		t.Error("expected hint to be detected")
+	}
+}
+
+func TestIsDownloadHint_WhenNormalOutput_ItShouldReturnFalse(t *testing.T) {
+	normal := `[{"name":"pod-1","namespace":"default"}]`
+	if isDownloadHint(normal) {
+		t.Error("expected normal output to not be detected as hint")
+	}
+}
+
 func TestGetOpts_WhenWaitTimeout_ItShouldDefaultTo5Minutes(t *testing.T) {
 	defaultTimeout := 5 * time.Minute
 	if defaultTimeout != 5*time.Minute {

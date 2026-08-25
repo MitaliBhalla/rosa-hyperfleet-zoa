@@ -3,7 +3,6 @@ package actions
 import (
 	"context"
 	"fmt"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
@@ -78,7 +77,6 @@ func (d *deletePod) Execute(ctx context.Context, params *ExecutionParams) (*Acti
 		return nil, fmt.Errorf("failed to delete pod %s/%s: %w", ns, name, err)
 	}
 
-	timeout := time.After(2 * time.Minute)
 	for {
 		select {
 		case event, ok := <-watcher.ResultChan():
@@ -96,17 +94,15 @@ func (d *deletePod) Execute(ctx context.Context, params *ExecutionParams) (*Acti
 					Summary: fmt.Sprintf("Pod %s/%s deleted successfully", ns, name),
 				}, nil
 			}
-		case <-timeout:
+		case <-ctx.Done():
 			return &ActionResult{
 				Success: true,
 				Output:  map[string]string{"status": "delete-initiated"},
 				AffectedResources: []AffectedResource{
 					{Kind: "Pod", Namespace: ns, Name: name, Action: "deleted"},
 				},
-				Summary: fmt.Sprintf("Pod %s/%s deletion initiated but timed out waiting for confirmation", ns, name),
+				Summary: fmt.Sprintf("Pod %s/%s deletion initiated; pod still terminating when deadline reached", ns, name),
 			}, nil
-		case <-ctx.Done():
-			return nil, ctx.Err()
 		}
 	}
 }
