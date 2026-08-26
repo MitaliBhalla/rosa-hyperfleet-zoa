@@ -103,15 +103,15 @@ func TestHandleListExecutions_WhenExecutionsExist_ItShouldReturnThem(t *testing.
 	}
 }
 
-func TestHandleListExecutions_WhenMissingAccountID_ItShouldReturn400(t *testing.T) {
+func TestHandleListExecutions_WhenNoAccountID_ItShouldStillReturn200(t *testing.T) {
 	h := testHandler(&mockExecStore{})
 
 	rr := doRequest(h, "GET", "/api/v0/trusted-actions/runs", nil, map[string]string{
 		"X-Operator": "sre@test.com",
 	})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -150,13 +150,13 @@ func TestHandleAudit_WhenEntriesExist_ItShouldReturnThem(t *testing.T) {
 	}
 }
 
-func TestHandleAudit_WhenMissingAccountID_ItShouldReturn400(t *testing.T) {
-	h := testHandler(&mockExecStore{})
+func TestHandleAudit_WhenNoAccountID_ItShouldStillReturn200(t *testing.T) {
+	h := testHandlerWithAudit(&mockExecStore{}, &mockAuditStoreWithData{})
 
 	rr := doRequest(h, "GET", "/api/v0/trusted-actions/audit", nil, map[string]string{})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -188,6 +188,9 @@ type errorExecStore struct {
 func (e *errorExecStore) List(_ context.Context, _ string, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
 	return nil, e.err
 }
+func (e *errorExecStore) ListAll(_ context.Context, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
+	return nil, e.err
+}
 
 type mockAuditStoreWithData struct {
 	entries []*store.AuditEntry
@@ -195,6 +198,9 @@ type mockAuditStoreWithData struct {
 
 func (m *mockAuditStoreWithData) Record(_ context.Context, _ *store.AuditEntry) error { return nil }
 func (m *mockAuditStoreWithData) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return m.entries, nil
+}
+func (m *mockAuditStoreWithData) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return m.entries, nil
 }
 
@@ -232,6 +238,11 @@ func (m *filterCapturingExecStore) List(_ context.Context, _ string, limit int, 
 	m.capturedLimit = limit
 	return m.executions, nil
 }
+func (m *filterCapturingExecStore) ListAll(_ context.Context, limit int, filter *store.ListFilter) ([]*store.Execution, error) {
+	m.capturedFilter = filter
+	m.capturedLimit = limit
+	return m.executions, nil
+}
 
 type filterCapturingAuditStore struct {
 	entries        []*store.AuditEntry
@@ -240,6 +251,10 @@ type filterCapturingAuditStore struct {
 
 func (m *filterCapturingAuditStore) Record(_ context.Context, _ *store.AuditEntry) error { return nil }
 func (m *filterCapturingAuditStore) List(_ context.Context, _ string, filter *store.AuditFilter) ([]*store.AuditEntry, error) {
+	m.capturedFilter = filter
+	return m.entries, nil
+}
+func (m *filterCapturingAuditStore) ListAll(_ context.Context, filter *store.AuditFilter) ([]*store.AuditEntry, error) {
 	m.capturedFilter = filter
 	return m.entries, nil
 }
@@ -277,6 +292,42 @@ func TestHandleListExecutions_WhenFiltersProvided_ItShouldPassFilterToStore(t *t
 	}
 	if f.Limit != 10 {
 		t.Errorf("expected limit=10, got %d", f.Limit)
+	}
+}
+
+func TestHandleListExecutions_WhenTargetProvided_ItShouldPassTargetFilter(t *testing.T) {
+	execStore := &filterCapturingExecStore{}
+	h := testHandler(execStore)
+
+	rr := doRequest(h, "GET", "/api/v0/trusted-actions/runs?target=eph-dev-mc01", nil, defaultHeaders())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	f := execStore.capturedFilter
+	if f == nil {
+		t.Fatal("expected filter to be passed to store")
+	}
+	if f.Target == nil || *f.Target != "eph-dev-mc01" {
+		t.Errorf("expected target=eph-dev-mc01, got %v", f.Target)
+	}
+}
+
+func TestHandleAudit_WhenTargetProvided_ItShouldPassTargetFilter(t *testing.T) {
+	auditStore := &filterCapturingAuditStore{}
+	h := testHandlerWithAudit(&mockExecStore{}, auditStore)
+
+	rr := doRequest(h, "GET", "/api/v0/trusted-actions/audit?target=eph-dev-rc", nil, defaultHeaders())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	f := auditStore.capturedFilter
+	if f == nil {
+		t.Fatal("expected filter to be passed to store")
+	}
+	if f.Target == nil || *f.Target != "eph-dev-rc" {
+		t.Errorf("expected target=eph-dev-rc, got %v", f.Target)
 	}
 }
 
@@ -341,6 +392,9 @@ func (m *auditCapturingStore) Record(_ context.Context, e *store.AuditEntry) err
 	return nil
 }
 func (m *auditCapturingStore) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return m.entries, nil
+}
+func (m *auditCapturingStore) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return m.entries, nil
 }
 

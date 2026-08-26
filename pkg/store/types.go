@@ -52,6 +52,7 @@ type Execution struct {
 	ApprovedBy string `json:"approved_by,omitempty" dynamodbav:"approvedBy,omitempty"`
 
 	TargetStatusKey string `json:"-" dynamodbav:"targetStatusKey,omitempty"`
+	DateBucket      string `json:"-" dynamodbav:"dateBucket,omitempty"`
 
 	TTL int64 `json:"-" dynamodbav:"ttl,omitempty"`
 }
@@ -80,10 +81,12 @@ type AuditEntry struct {
 	Force         bool   `json:"force,omitempty" dynamodbav:"force,omitempty"`
 	DryRun        bool   `json:"dry_run,omitempty" dynamodbav:"dryRun,omitempty"`
 	ExecutionID   string `json:"execution_id,omitempty" dynamodbav:"executionId,omitempty"`
+	DateBucket    string `json:"-" dynamodbav:"dateBucket,omitempty"`
 	TTL           int64  `json:"-" dynamodbav:"ttl,omitempty"`
 }
 
 type ListFilter struct {
+	Target        *string
 	Status        *Status
 	ExecutionMode *string
 	Action        *string
@@ -97,6 +100,7 @@ type ListFilter struct {
 }
 
 type AuditFilter struct {
+	Target   *string
 	Since    *time.Time
 	Before   *time.Time
 	Action   *string

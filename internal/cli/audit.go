@@ -74,7 +74,9 @@ func newAuditCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.approval, "approval", "", "Filter by approval state")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced operations")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Show only dry-run operations")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
+	// Default --since 24h ensures the date-bucket-index GSI is always used efficiently.
+	// Without a time bound, the API would need to query all daily partitions — expensive at scale.
+	cmd.Flags().StringVar(&opts.since, "since", "24h", "Filter by time (e.g. 1h, 24h, 7d)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results (max 200)")
 
 	return cmd

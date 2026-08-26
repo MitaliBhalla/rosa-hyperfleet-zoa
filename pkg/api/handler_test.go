@@ -65,6 +65,9 @@ func (m *mockExecStore) Get(_ context.Context, id string) (*store.Execution, err
 func (m *mockExecStore) List(_ context.Context, _ string, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
 	return m.executions, nil
 }
+func (m *mockExecStore) ListAll(_ context.Context, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
+	return m.executions, nil
+}
 func (m *mockExecStore) TransitionStatus(_ context.Context, _ string, _, _ store.Status) error {
 	return nil
 }
@@ -98,6 +101,9 @@ type mockAuditStore struct{}
 
 func (m *mockAuditStore) Record(_ context.Context, _ *store.AuditEntry) error { return nil }
 func (m *mockAuditStore) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return nil, nil
+}
+func (m *mockAuditStore) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return nil, nil
 }
 
@@ -162,6 +168,9 @@ type auditCapturingStoreHandler struct {
 func (m *auditCapturingStoreHandler) Record(_ context.Context, e *store.AuditEntry) error {
 	m.recorded = append(m.recorded, e)
 	return nil
+}
+func (m *auditCapturingStoreHandler) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return nil, nil
 }
 func (m *auditCapturingStoreHandler) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return nil, nil

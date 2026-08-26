@@ -78,7 +78,9 @@ func newRunsCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.executionMode, "execution-mode", "", "Filter by execution class (sync|async)")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Show only dry-run executions")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced executions")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
+	// Default --since 24h ensures the date-bucket-index GSI is always used efficiently.
+	// Without a time bound, the API would need to query all daily partitions — expensive at scale.
+	cmd.Flags().StringVar(&opts.since, "since", "24h", "Filter by time (e.g. 1h, 24h, 7d)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 20, "Max results (max 100)")
 
 	return cmd

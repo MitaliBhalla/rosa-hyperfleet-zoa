@@ -215,55 +215,42 @@ func (h *Handler) handleGetExecution(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
-	accountID := r.Header.Get("X-Account-ID")
-	if accountID == "" {
-		writeError(w, http.StatusBadRequest, "missing_account", "X-Account-ID header required")
-		return
-	}
-
 	q := r.URL.Query()
 	filter := &store.ListFilter{}
-	hasFilter := false
 
+	if v := q.Get("target"); v != "" {
+		filter.Target = &v
+	}
 	if v := q.Get("status"); v != "" {
 		s := store.Status(v)
 		filter.Status = &s
-		hasFilter = true
 	}
 	if v := q.Get("execution_mode"); v != "" {
 		filter.ExecutionMode = &v
-		hasFilter = true
 	}
 	if v := q.Get("action"); v != "" {
 		filter.Action = &v
-		hasFilter = true
 	}
 	if v := q.Get("type"); v != "" {
 		filter.Type = &v
-		hasFilter = true
 	}
 	if v := q.Get("scope"); v != "" {
 		filter.Scope = &v
-		hasFilter = true
 	}
 	if v := q.Get("operator"); v != "" {
 		filter.Operator = &v
-		hasFilter = true
 	}
 	if q.Get("dry_run") == "true" {
 		dryRun := true
 		filter.DryRun = &dryRun
-		hasFilter = true
 	}
 	if q.Get("force") == "true" {
 		force := true
 		filter.Force = &force
-		hasFilter = true
 	}
 	if v := q.Get("since"); v != "" {
 		if t, err := parseSince(v); err == nil {
 			filter.Since = &t
-			hasFilter = true
 		}
 	}
 
@@ -277,12 +264,7 @@ func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Limit = limit
 
-	var filterPtr *store.ListFilter
-	if hasFilter || limit != 50 {
-		filterPtr = filter
-	}
-
-	executions, err := h.executionStore.List(r.Context(), accountID, limit, filterPtr)
+	executions, err := h.executionStore.ListAll(r.Context(), limit, filter)
 	if err != nil {
 		h.logger.Error("failed to list executions", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list executions")
@@ -313,15 +295,12 @@ func (h *Handler) handleListActions(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
-	accountID := r.Header.Get("X-Account-ID")
-	if accountID == "" {
-		writeError(w, http.StatusBadRequest, "missing_account", "X-Account-ID header required")
-		return
-	}
-
 	q := r.URL.Query()
 	filter := &store.AuditFilter{}
 
+	if v := q.Get("target"); v != "" {
+		filter.Target = &v
+	}
 	if v := q.Get("since"); v != "" {
 		if t, err := parseSince(v); err == nil {
 			filter.Since = &t
@@ -355,7 +334,7 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Limit = limit
 
-	entries, err := h.auditStore.List(r.Context(), accountID, filter)
+	entries, err := h.auditStore.ListAll(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list audit entries", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list audit entries")
@@ -364,7 +343,7 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 
 	h.recordAudit(r, http.StatusOK, "", "")
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "total": len(entries)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "count": len(entries)})
 }
 
 func (h *Handler) fetchArtifact(ctx context.Context, id, artifact string) ([]byte, error) {
