@@ -2,11 +2,10 @@
 
 ZOA container images build on Konflux (`rosa-tenant` / `kflux-prd-rh02`).
 
-| Phase | Component | Containerfile | Quay image |
-|-------|-----------|---------------|------------|
-| **Now (legacy)** | `rosa-hyperfleet-zoa` | `Containerfile` | `quay.io/.../rosa-hyperfleet-zoa` |
-| **Target** | `zoa-lambda` | `Containerfile` | `quay.io/.../zoa-lambda` |
-| **Target** | `zoa-runner` | `Containerfile.runner` | `quay.io/.../zoa-runner` |
+| Component | Containerfile | Quay image |
+|-----------|---------------|------------|
+| `zoa-lambda` | `Containerfile` | `quay.io/redhat-user-workloads/rosa-tenant/zoa-lambda` |
+| `zoa-runner` | `Containerfile.runner` | `quay.io/redhat-user-workloads/rosa-tenant/zoa-runner` |
 
 Application: `rosa-hyperfleet-zoa` ([Konflux UI](https://konflux-ui.apps.kflux-prd-rh02.0fk9.p1.openshiftapps.com/ns/rosa-tenant/applications/rosa-hyperfleet-zoa/activity))
 
@@ -20,4 +19,9 @@ Release-data components `zoa-lambda` and `zoa-runner` are registered in [konflux
 |-------------|-----------|---------|
 | `zoa-lambda-on-pull-request` / `zoa-lambda-on-push` | `zoa-lambda` | `Containerfile`, `cmd/zoa-lambda/**`, shared Go paths |
 | `zoa-runner-on-pull-request` / `zoa-runner-on-push` | `zoa-runner` | `Containerfile.runner`, `cmd/zoa-runner/**`, `cmd/zoa/**`, shared Go paths |
-| `rosa-hyperfleet-zoa-on-pull-request` / `rosa-hyperfleet-zoa-on-push` | `rosa-hyperfleet-zoa` | All PRs / pushes (legacy; remove after cutover) |
+
+## Merge order
+
+1. [konflux-release-data MR !21897](https://gitlab.cee.redhat.com/releng/konflux-release-data/-/merge_requests/21897) — remove legacy `rosa-hyperfleet-zoa` component; finalize `zoa-lambda` / `zoa-runner`
+2. Merge this PR (`.tekton/zoa-lambda-*` + `.tekton/zoa-runner-*`)
+3. `openshift/release` — update branch protection required Konflux check names
