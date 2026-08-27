@@ -461,9 +461,9 @@ func TestHandleAudit_WhenCalled_ItShouldRecordAudit(t *testing.T) {
 	}
 }
 
-// --- parseSince ---
+// --- parseTimeValue ---
 
-func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
+func TestParseTimeValue_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 	cases := []struct {
 		input  string
 		minAgo int64
@@ -478,7 +478,7 @@ func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
-			result, err := parseSince(tc.input)
+			result, err := parseTimeValue(tc.input)
 			if err != nil {
 				t.Fatalf("unexpected error for %q: %v", tc.input, err)
 			}
@@ -490,11 +490,44 @@ func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 	}
 }
 
-func TestParseSince_WhenInvalid_ItShouldReturnError(t *testing.T) {
+func TestParseTimeValue_WhenShortDate_ItShouldReturnStartOfDay(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseTimeValue_WhenRFC3339_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25T14:30:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseTimeValue_WhenRFC3339WithOffset_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25T16:30:00+02:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.UTC().Equal(expected) {
+		t.Errorf("expected %v UTC, got %v UTC", expected, result.UTC())
+	}
+}
+
+func TestParseTimeValue_WhenInvalid_ItShouldReturnError(t *testing.T) {
 	cases := []string{"", "h", "abc", "1x", "1"}
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) {
-			_, err := parseSince(input)
+			_, err := parseTimeValue(input)
 			if err == nil {
 				t.Errorf("expected error for %q, got nil", input)
 			}

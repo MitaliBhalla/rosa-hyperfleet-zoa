@@ -22,6 +22,7 @@ type runsOptions struct {
 	dryRun        bool
 	force         bool
 	since         string
+	until         string
 	limit         int
 }
 
@@ -80,7 +81,8 @@ func newRunsCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced executions")
 	// Default --since 24h ensures the date-bucket-index GSI is always used efficiently.
 	// Without a time bound, the API would need to query all daily partitions — expensive at scale.
-	cmd.Flags().StringVar(&opts.since, "since", "24h", "Filter by time (e.g. 1h, 24h, 7d)")
+	cmd.Flags().StringVar(&opts.since, "since", "24h", "Start of time window (duration: 1h, 7d; date: 2026-08-25; RFC3339: 2026-08-25T14:00:00Z)")
+	cmd.Flags().StringVar(&opts.until, "until", "", "End of time window (same formats as --since; default: now)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 20, "Max results (max 100)")
 
 	return cmd
@@ -122,6 +124,9 @@ func listRuns(ctx context.Context, global *GlobalOptions, opts *runsOptions) err
 	}
 	if opts.since != "" {
 		query.Set("since", opts.since)
+	}
+	if opts.until != "" {
+		query.Set("until", opts.until)
 	}
 	if opts.limit > 0 {
 		query.Set("limit", fmt.Sprintf("%d", opts.limit))

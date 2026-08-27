@@ -141,27 +141,44 @@ func (s *DynamoDBExecutionStore) ListAll(ctx context.Context, limit int, filter 
 }
 
 // listAllByDateBucket queries the date-bucket-index GSI day-by-day from today
-// backwards until the Since boundary. Each bucket query returns items sorted by
-// createdAt descending (newest first within that day). Because we iterate buckets
-// from today backwards, the combined result set is naturally newest-to-oldest.
+// (or filter.Before) backwards until the Since boundary. Each bucket query returns
+// items sorted by createdAt descending (newest first within that day). Because we
+// iterate buckets from newest to oldest, the combined result is naturally newest-first.
 func (s *DynamoDBExecutionStore) listAllByDateBucket(ctx context.Context, filter *ListFilter, resultLimit int) ([]*Execution, error) {
 	since := time.Now().Add(-24 * time.Hour)
 	if filter != nil && filter.Since != nil {
 		since = *filter.Since
 	}
 
+	endTime := time.Now().UTC()
+	if filter != nil && filter.Before != nil {
+		endTime = filter.Before.UTC()
+	}
+
 	sinceStr := since.Format(time.RFC3339Nano)
-	today := time.Now().UTC().Truncate(24 * time.Hour)
+	endDay := endTime.Truncate(24 * time.Hour)
 	startDay := since.UTC().Truncate(24 * time.Hour)
 
 	var executions []*Execution
-	for day := today; !day.Before(startDay); day = day.AddDate(0, 0, -1) {
+	for day := endDay; !day.Before(startDay); day = day.AddDate(0, 0, -1) {
 		bucket := day.Format("2006-01-02")
 
-		keyCond := expression.KeyAnd(
-			expression.Key("dateBucket").Equal(expression.Value(bucket)),
-			expression.Key("createdAt").GreaterThanEqual(expression.Value(sinceStr)),
-		)
+		var keyCond expression.KeyConditionBuilder
+		if filter != nil && filter.Before != nil {
+			beforeStr := filter.Before.Format(time.RFC3339Nano)
+			keyCond = expression.KeyAnd(
+				expression.Key("dateBucket").Equal(expression.Value(bucket)),
+				expression.Key("createdAt").Between(
+					expression.Value(sinceStr),
+					expression.Value(beforeStr),
+				),
+			)
+		} else {
+			keyCond = expression.KeyAnd(
+				expression.Key("dateBucket").Equal(expression.Value(bucket)),
+				expression.Key("createdAt").GreaterThanEqual(expression.Value(sinceStr)),
+			)
+		}
 
 		builder := expression.NewBuilder().WithKeyCondition(keyCond)
 		builder = s.applyFilterConditions(builder, filter, false)

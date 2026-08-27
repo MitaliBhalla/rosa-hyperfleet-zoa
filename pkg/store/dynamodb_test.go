@@ -1091,6 +1091,107 @@ func TestDynamoDBExecutionStore_ListAll_WhenStatusWithSince_ItShouldQueryDateBuc
 	}
 }
 
+func TestDynamoDBExecutionStore_ListAll_WhenSinceAndBefore_ItShouldUseBetweenKeyCondition(t *testing.T) {
+	usedBetween := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				if params.KeyConditionExpression != nil {
+					expr := *params.KeyConditionExpression
+					hasBetween := false
+					for _, v := range params.ExpressionAttributeValues {
+						_ = v
+					}
+					if len(expr) > 0 {
+						hasBetween = len(params.ExpressionAttributeValues) >= 3
+					}
+					if hasBetween {
+						usedBetween = true
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	before := time.Now().Add(-1 * time.Hour)
+	filter := &ListFilter{Since: &since, Before: &before}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !usedBetween {
+		t.Error("expected Between key condition when both Since and Before are set (need at least 3 expression attribute values: dateBucket + sinceStr + beforeStr)")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenBeforeSet_ItShouldStartFromBeforeDay(t *testing.T) {
+	now := time.Now().UTC()
+	before := now.Add(-48 * time.Hour)
+	beforeDay := before.Truncate(24 * time.Hour).Format("2006-01-02")
+
+	bucketsQueried := map[string]bool{}
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				for _, v := range params.ExpressionAttributeValues {
+					if s, ok := v.(*types.AttributeValueMemberS); ok {
+						if len(s.Value) == 10 {
+							bucketsQueried[s.Value] = true
+						}
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := now.Add(-72 * time.Hour)
+	filter := &ListFilter{Since: &since, Before: &before}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	todayStr := now.Truncate(24 * time.Hour).Format("2006-01-02")
+	if bucketsQueried[todayStr] {
+		t.Errorf("should NOT query today's bucket (%s) when --until is 2 days ago", todayStr)
+	}
+	if !bucketsQueried[beforeDay] {
+		t.Errorf("should query the --until day bucket (%s)", beforeDay)
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenSinceAndBefore_ItShouldUseBetweenKeyCondition(t *testing.T) {
+	usedBetween := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				if params.KeyConditionExpression != nil {
+					if len(params.ExpressionAttributeValues) >= 3 {
+						usedBetween = true
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	store := NewAuditStore(mock, "audit-table", 365)
+	since := time.Now().Add(-24 * time.Hour)
+	before := time.Now().Add(-1 * time.Hour)
+	filter := &AuditFilter{Since: &since, Before: &before}
+	_, err := store.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !usedBetween {
+		t.Error("expected Between key condition when both Since and Before are set for audit")
+	}
+}
+
 func TestDynamoDBExecutionStore_ListAll_WhenFilterWithAction_ItShouldApplyFilterExpression(t *testing.T) {
 	mock := &mockDynamoDBAPI{
 		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {

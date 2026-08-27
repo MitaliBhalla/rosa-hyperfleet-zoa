@@ -249,8 +249,13 @@ func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
 		filter.Force = &force
 	}
 	if v := q.Get("since"); v != "" {
-		if t, err := parseSince(v); err == nil {
+		if t, err := parseTimeValue(v); err == nil {
 			filter.Since = &t
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if t, err := parseTimeValue(v); err == nil {
+			filter.Before = &t
 		}
 	}
 
@@ -302,8 +307,13 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 		filter.Target = &v
 	}
 	if v := q.Get("since"); v != "" {
-		if t, err := parseSince(v); err == nil {
+		if t, err := parseTimeValue(v); err == nil {
 			filter.Since = &t
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if t, err := parseTimeValue(v); err == nil {
+			filter.Before = &t
 		}
 	}
 	if v := q.Get("action"); v != "" {
@@ -442,15 +452,32 @@ func (h *Handler) recordAudit(r *http.Request, statusCode int, action, execution
 	}
 }
 
-func parseSince(s string) (time.Time, error) {
+// parseTimeValue parses flexible time formats:
+//   - Duration relative to now: "1h", "24h", "7d", "30m", "300s"
+//   - Short date (start of day UTC): "2026-08-25"
+//   - RFC3339 timestamp: "2026-08-25T14:00:00Z"
+//
+// For --since, durations are subtracted from now. For --until, durations are also
+// subtracted (e.g. --until 1h means "up to 1 hour ago").
+func parseTimeValue(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+
 	if len(s) < 2 {
-		return time.Time{}, fmt.Errorf("invalid since: %s", s)
+		return time.Time{}, fmt.Errorf("invalid time value: %s", s)
 	}
 	unit := s[len(s)-1]
 	numStr := s[:len(s)-1]
 	var n int
 	if _, err := fmt.Sscanf(numStr, "%d", &n); err != nil {
-		return time.Time{}, fmt.Errorf("invalid since: %s", s)
+		return time.Time{}, fmt.Errorf("invalid time value: %s", s)
 	}
 	var d time.Duration
 	switch unit {
@@ -463,7 +490,7 @@ func parseSince(s string) (time.Time, error) {
 	case 'd':
 		d = time.Duration(n) * 24 * time.Hour
 	default:
-		return time.Time{}, fmt.Errorf("invalid since unit: %c", unit)
+		return time.Time{}, fmt.Errorf("invalid time unit: %c", unit)
 	}
 	return time.Now().Add(-d), nil
 }

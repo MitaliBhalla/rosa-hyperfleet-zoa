@@ -96,6 +96,7 @@ type ListFilter struct {
 	DryRun        *bool
 	Force         *bool
 	Since         *time.Time
+	Before        *time.Time
 	Limit         int
 }
 
