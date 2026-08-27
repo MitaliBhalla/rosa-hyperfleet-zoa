@@ -534,3 +534,50 @@ func TestParseTimeValue_WhenInvalid_ItShouldReturnError(t *testing.T) {
 		})
 	}
 }
+
+// --- parseUntilTimeValue ---
+
+func TestParseUntilTimeValue_WhenShortDate_ItShouldReturnEndOfDay(t *testing.T) {
+	result, err := parseUntilTimeValue("2026-08-25")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v (end of 2026-08-25), got %v", expected, result)
+	}
+}
+
+func TestParseUntilTimeValue_WhenRFC3339_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseUntilTimeValue("2026-08-25T14:30:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseUntilTimeValue_WhenDuration_ItShouldSubtractFromNow(t *testing.T) {
+	result, err := parseUntilTimeValue("1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	agoSec := int64(time.Since(result).Seconds())
+	if agoSec < 3500 || agoSec > 3700 {
+		t.Errorf("expected ~3600s ago, got %ds", agoSec)
+	}
+}
+
+func TestParseUntilTimeValue_WhenInvalid_ItShouldReturnError(t *testing.T) {
+	cases := []string{"", "h", "abc", "1x", "1"}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			_, err := parseUntilTimeValue(input)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", input)
+			}
+		})
+	}
+}

@@ -254,7 +254,7 @@ func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v := q.Get("until"); v != "" {
-		if t, err := parseTimeValue(v); err == nil {
+		if t, err := parseUntilTimeValue(v); err == nil {
 			filter.Before = &t
 		}
 	}
@@ -312,7 +312,7 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if v := q.Get("until"); v != "" {
-		if t, err := parseTimeValue(v); err == nil {
+		if t, err := parseUntilTimeValue(v); err == nil {
 			filter.Before = &t
 		}
 	}
@@ -420,6 +420,12 @@ func withDryRun(dryRun bool) AuditOption {
 	return func(o *auditOpts) { o.dryRun = dryRun }
 }
 
+// recordAudit persists an audit entry for the request. X-Account-ID and
+// X-Operator are always populated in legitimate requests because the ZOA CLI
+// sets them unconditionally (the CLI must have valid AWS credentials to sign
+// requests via SigV4, and it derives account-id from those credentials).
+// List/audit handlers no longer reject missing X-Account-ID to enable
+// cross-cluster visibility, but that path is unreachable from the CLI.
 func (h *Handler) recordAudit(r *http.Request, statusCode int, action, executionID string, opts ...AuditOption) {
 	if h.auditStore == nil {
 		return
@@ -452,13 +458,12 @@ func (h *Handler) recordAudit(r *http.Request, statusCode int, action, execution
 	}
 }
 
-// parseTimeValue parses flexible time formats:
+// parseTimeValue parses flexible time formats for --since (lower bound):
 //   - Duration relative to now: "1h", "24h", "7d", "30m", "300s"
-//   - Short date (start of day UTC): "2026-08-25"
+//   - Short date (start of day UTC): "2026-08-25" → 2026-08-25T00:00:00Z
 //   - RFC3339 timestamp: "2026-08-25T14:00:00Z"
 //
-// For --since, durations are subtracted from now. For --until, durations are also
-// subtracted (e.g. --until 1h means "up to 1 hour ago").
+// For durations, the value is subtracted from now (e.g. "1h" = 1 hour ago).
 func parseTimeValue(s string) (time.Time, error) {
 	if t, err := time.Parse(time.RFC3339, s); err == nil {
 		return t, nil
@@ -469,7 +474,28 @@ func parseTimeValue(s string) (time.Time, error) {
 	if t, err := time.Parse("2006-01-02", s); err == nil {
 		return t, nil
 	}
+	return parseDuration(s)
+}
 
+// parseUntilTimeValue parses flexible time formats for --until (upper bound).
+// Same formats as parseTimeValue, but short dates resolve to end-of-day
+// (i.e. +24h) following journalctl/Elasticsearch convention:
+//   - "2026-08-25" → 2026-08-26T00:00:00Z (includes all of Aug 25th)
+//   - RFC3339 and durations behave identically to parseTimeValue
+func parseUntilTimeValue(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.Add(24 * time.Hour), nil
+	}
+	return parseDuration(s)
+}
+
+func parseDuration(s string) (time.Time, error) {
 	if len(s) < 2 {
 		return time.Time{}, fmt.Errorf("invalid time value: %s", s)
 	}
