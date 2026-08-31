@@ -4,16 +4,16 @@ metadata:
   annotations:
     build.appstudio.openshift.io/repo: https://github.com/openshift-online/rosa-hyperfleet-zoa?rev={{revision}}
     build.appstudio.redhat.com/commit_sha: '{{revision}}'
+    build.appstudio.redhat.com/pull_request_number: '{{pull_request_number}}'
     build.appstudio.redhat.com/target_branch: '{{target_branch}}'
-    pipelinesascode.tekton.dev/cancel-in-progress: "false"
+    pipelinesascode.tekton.dev/cancel-in-progress: "true"
     pipelinesascode.tekton.dev/max-keep-runs: "3"
-    pipelinesascode.tekton.dev/on-cel-expression: event == "push" && target_branch
-      == "main"
+    pipelinesascode.tekton.dev/on-cel-expression: event == "pull_request" && target_branch == "main" && ( "Containerfile".pathChanged() || "cmd/zoa-lambda/***".pathChanged() || "pkg/***".pathChanged() || "internal/***".pathChanged() || "go.mod".pathChanged() || "go.sum".pathChanged() || ".tekton/zoa-lambda-pull-request.yaml".pathChanged() )
   labels:
     appstudio.openshift.io/application: rosa-hyperfleet-zoa
-    appstudio.openshift.io/component: rosa-hyperfleet-zoa
+    appstudio.openshift.io/component: zoa-lambda
     pipelines.appstudio.openshift.io/type: build
-  name: rosa-hyperfleet-zoa-on-push
+  name: zoa-lambda-on-pull-request
   namespace: rosa-tenant
 spec:
   params:
@@ -22,7 +22,9 @@ spec:
   - name: revision
     value: '{{revision}}'
   - name: output-image
-    value: quay.io/redhat-user-workloads/rosa-tenant/rosa-hyperfleet-zoa:{{revision}}
+    value: quay.io/redhat-user-workloads/rosa-tenant/zoa-lambda:on-pr-{{revision}}
+  - name: image-expires-after
+    value: 5d
   - name: build-platforms
     value:
     - linux/x86_64
@@ -30,12 +32,6 @@ spec:
     value: Containerfile
   - name: path-context
     value: .
-  - name: hermetic
-    value: "true"
-  - name: prefetch-input
-    value: '{"type": "gomod", "path": "."}'
-  - name: build-source-image
-    value: "true"
   pipelineSpec:
     description: |
       This pipeline is ideal for building multi-arch container images from a Containerfile while maintaining trust after pipeline customization.
@@ -418,7 +414,7 @@ spec:
         - name: name
           value: sast-snyk-check-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-sast-snyk-check-oci-ta:0.5@sha256:eba24f5d9f4b18aa71e523b9b3dbcf22982aa4b018824260a090b19dfc9abf6f
+          value: quay.io/konflux-ci/tekton-catalog/task-sast-snyk-check-oci-ta:0.5@sha256:b78e9c05c5126613eddee53f2f3534a9b86bfca17d903599f2fa465b7938e241
         - name: kind
           value: task
         resolver: bundles
@@ -578,7 +574,7 @@ spec:
     - name: netrc
       optional: true
   taskRunTemplate:
-    serviceAccountName: build-pipeline-rosa-hyperfleet-zoa
+    serviceAccountName: build-pipeline-zoa-lambda
   workspaces:
   - name: git-auth
     secret:
