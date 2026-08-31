@@ -166,6 +166,13 @@ For details on K8s resources and the streaming architecture, see [Implementation
 | `zoa-lambda` | `Containerfile` | `zoa-lambda` binary (UBI-minimal) | Deployed as Lambda function (API + Worker modes) |
 | `zoa-runner` | `Containerfile.runner` | `zoa-runner` + `zoa` CLI | Runs inside K8s Jobs for async TA execution |
 
+## Install the CLI
+
+See [CLI Reference — Install](docs/cli-reference.md#install) for download
+instructions and checksum verification.
+
+To build from source: `make build` (requires Go 1.26+).
+
 ## Quick Start
 
 ```bash

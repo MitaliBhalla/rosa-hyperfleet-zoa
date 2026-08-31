@@ -1,8 +1,13 @@
-.PHONY: all build clean install test fmt fmt-check vet lint verify tidy \
+.PHONY: all build dist print-version clean install test fmt fmt-check vet lint verify tidy \
        image image-runner image-push image-push-runner help
 
 BINARY_NAME = zoa
 BUILD_DIR   = ./bin
+DIST_DIR    ?= ./dist
+
+# Cross-compiled CLI artifacts for GitHub Releases (kubectl-style).
+CLI_PLATFORMS ?= linux/amd64 linux/arm64 darwin/amd64 darwin/arm64
+HASH_CMD      := $(shell command -v sha256sum >/dev/null 2>&1 && echo sha256sum || echo "shasum -a 256")
 
 # Container images
 IMAGE_REPO        ?= quay.io/slopezz/zoa-lambda
@@ -20,9 +25,11 @@ GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/golangci-lint)
 $(GOLANGCI_LINT): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR); go build -tags=tools -o $(abspath $(TOOLS_BIN_DIR))/golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
-VERSION     = 0.2.0
+VERSION     = 0.3.0
 VERSION_PKG = github.com/openshift-online/rosa-hyperfleet-zoa/internal/version
-LDFLAGS     = -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
+VERSION_LDFLAGS = -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+LDFLAGS         = -ldflags "$(VERSION_LDFLAGS)"
+DIST_LDFLAGS    = -ldflags "-s -w $(VERSION_LDFLAGS)"
 
 # =============================================================================
 # Default
@@ -39,8 +46,28 @@ build:
 	@go build $(LDFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/zoa/
 	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)"
 
+# print-version is the single parser used by CI so we don't grep Makefile by hand.
+print-version:
+	@echo $(VERSION)
+
+# Cross-compile the CLI for GitHub Releases. Same version ldflags as `build`,
+# plus -s -w (stripped) and -trimpath so artifacts are smaller and more reproducible.
+dist:
+	@rm -rf $(DIST_DIR)
+	@mkdir -p $(DIST_DIR)
+	@for platform in $(CLI_PLATFORMS); do \
+		os=$${platform%/*}; \
+		arch=$${platform#*/}; \
+		out="$(DIST_DIR)/zoa-$$os-$$arch"; \
+		echo "Building $$out"; \
+		CGO_ENABLED=0 GOOS=$$os GOARCH=$$arch go build -trimpath $(DIST_LDFLAGS) -o "$$out" ./cmd/zoa/; \
+	done
+	@cd $(DIST_DIR) && $(HASH_CMD) zoa-* > SHA256SUMS
+	@echo "✓ $(DIST_DIR)"
+	@ls -lh $(DIST_DIR)
+
 clean:
-	@rm -rf $(BUILD_DIR) coverage.out
+	@rm -rf $(BUILD_DIR) $(DIST_DIR) coverage.out
 
 install:
 	@go install $(LDFLAGS) ./cmd/zoa/
@@ -108,6 +135,8 @@ image-push-runner: image-runner
 help:
 	@echo "Build:"
 	@echo "  build              Build zoa CLI (./bin/zoa)"
+	@echo "  dist               Cross-compile CLI for GitHub Releases (./dist)"
+	@echo "  print-version      Print the CLI VERSION from this Makefile"
 	@echo "  install            Install zoa to GOPATH/bin"
 	@echo "  clean              Remove build artifacts"
 	@echo ""
