@@ -25,7 +25,7 @@ GOLANGCI_LINT := $(abspath $(TOOLS_BIN_DIR)/golangci-lint)
 $(GOLANGCI_LINT): $(TOOLS_DIR)/go.mod
 	cd $(TOOLS_DIR); go build -tags=tools -o $(abspath $(TOOLS_BIN_DIR))/golangci-lint github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 
-VERSION     = 0.2.0
+VERSION     = 0.3.0
 VERSION_PKG = github.com/openshift-online/rosa-hyperfleet-zoa/internal/version
 VERSION_LDFLAGS = -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).GitCommit=$(GIT_COMMIT) -X $(VERSION_PKG).BuildDate=$(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 LDFLAGS         = -ldflags "$(VERSION_LDFLAGS)"
