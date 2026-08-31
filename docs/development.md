@@ -21,6 +21,7 @@ make all                    # fmt → vet → lint → test → build
 |--------|-------------|
 | `make all` | fmt → vet → lint → test → build (run before pushing) |
 | `make build` | Build `./bin/zoa` |
+| `make dist` | Cross-compile CLI for GitHub Releases (`./dist`) |
 | `make install` | Install to `$GOBIN` |
 | `make fmt` | Format code (`gofmt -w -s`) |
 | `make vet` | Static analysis (`go vet`) |
@@ -78,8 +79,22 @@ chore: bump golangci-lint to v2.13.0
 
 ## Releasing
 
-The CLI version is defined in the `VERSION` variable at the top of the `Makefile`.
-On merge to `main`, a GitHub Action checks if the version is new and creates a git tag + GitHub Release automatically.
+The CLI version is defined in the `VERSION` variable in the `Makefile`. Bump it
+and merge to `main`. The [Release CLI](../.github/workflows/release-cli.yml)
+workflow then:
+
+1. Skips if GitHub Release `v$(VERSION)` already exists (Makefile-only changes
+   with an unchanged version are no-ops).
+2. Cross-compiles `zoa` for `linux/amd64`, `linux/arm64`, `darwin/amd64`, and
+   `darwin/arm64` (`make dist`).
+3. Writes `SHA256SUMS` next to those binaries.
+4. Creates the git tag and GitHub Release with generated notes plus the assets.
+
+Install instructions for end users are in the
+[CLI Reference](cli-reference.md#install).
+
+Lambda and runner images are separate (`make image` / `make image-push`); they
+are not GitHub Release assets.
 
 ## Container Images
 

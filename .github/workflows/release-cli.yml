@@ -1,16 +1,22 @@
 name: Release CLI
 
+# Explicit release: bump VERSION in the Makefile and merge to main.
+# Lambda/runner live under cmd/ and internal/ too, so those paths are not
+# a release signal — only a new VERSION is.
 on:
   push:
     branches: [main]
     paths:
-      - 'cmd/**'
-      - 'internal/**'
-      - 'go.mod'
-      - 'go.sum'
+      - Makefile
+      - .github/workflows/release-cli.yml
+  workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -20,37 +26,54 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get VERSION from Makefile
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Read VERSION from Makefile
         id: version
         run: |
-          version=$(grep '^VERSION' Makefile | head -1 | sed 's/.*= *//; s/ *$//')
+          version="$(make print-version)"
           echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
           echo "Detected VERSION: ${version}"
 
-      - name: Check if tag already exists
+      - name: Check if GitHub Release already exists
         id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git rev-parse "v${{ steps.version.outputs.version }}" >/dev/null 2>&1; then
+          if gh release view "${{ steps.version.outputs.tag }}" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag v${{ steps.version.outputs.version }} already exists — skipping release"
+            echo "Release ${{ steps.version.outputs.tag }} already exists — skipping"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Tag v${{ steps.version.outputs.version }} is new — will create release"
+            echo "Release ${{ steps.version.outputs.tag }} is new — will publish binaries"
           fi
 
-      - name: Create release tag
+      - name: Build CLI binaries
         if: steps.check.outputs.exists == 'false'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "v${{ steps.version.outputs.version }}" -m "Release v${{ steps.version.outputs.version }}"
-          git push origin "v${{ steps.version.outputs.version }}"
+        run: make dist
 
       - name: Create GitHub Release
         if: steps.check.outputs.exists == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          gh release create "v${{ steps.version.outputs.version }}" \
-            --title "v${{ steps.version.outputs.version }}" \
-            --generate-notes
+          repo="${{ github.server_url }}/${{ github.repository }}"
+          cat > /tmp/install-notes.md <<'NOTES'
+          ## Install
+
+          See [CLI Reference — Install](<REPO>/blob/<TAG>/docs/cli-reference.md#install)
+          for download and checksum-verification instructions. Binaries and
+          `SHA256SUMS` are attached below.
+          NOTES
+          sed -i "s|<REPO>|${repo}|g; s|<TAG>|${TAG}|g" /tmp/install-notes.md
+
+          gh release create "$TAG" \
+            --title "zoa CLI ${TAG}" \
+            --target "${GITHUB_SHA}" \
+            --generate-notes \
+            --notes-file /tmp/install-notes.md \
+            dist/zoa-* dist/SHA256SUMS

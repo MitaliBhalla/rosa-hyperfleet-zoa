@@ -15,6 +15,43 @@ The CLI is deliberately built around **SRE muscle memory** — the patterns and 
 
 The goal: an SRE who has never seen ZOA should be productive within 30 seconds of reading `zoa --help`.
 
+## Install
+
+Download a pinned GitHub Release binary and verify the checksum.
+
+Linux x86_64:
+
+```bash
+VERSION=v0.3.0  # see https://github.com/openshift-online/rosa-hyperfleet-zoa/releases
+curl -fsSL -O "https://github.com/openshift-online/rosa-hyperfleet-zoa/releases/download/${VERSION}/zoa-linux-amd64"
+curl -fsSL -O "https://github.com/openshift-online/rosa-hyperfleet-zoa/releases/download/${VERSION}/SHA256SUMS"
+sha256sum -c SHA256SUMS --ignore-missing
+chmod +x zoa-linux-amd64
+sudo mv zoa-linux-amd64 /usr/local/bin/zoa
+zoa version
+```
+
+Other platforms — replace the binary name in the commands above:
+
+| OS / Arch | Binary |
+|-----------|--------|
+| Linux x86_64 | `zoa-linux-amd64` |
+| Linux ARM64 | `zoa-linux-arm64` |
+| macOS Intel | `zoa-darwin-amd64` |
+| macOS Apple Silicon | `zoa-darwin-arm64` |
+
+On macOS, `sha256sum` is not installed by default. Use the built-in equivalent:
+
+```bash
+shasum -a 256 -c SHA256SUMS --ignore-missing
+```
+
+### Development builds
+
+If you work on this repo, use `make build` (or `make install`). These inject
+full version metadata via ldflags, so `zoa version` reports the exact commit
+and build date — useful for debugging which build is deployed.
+
 ## Configuration
 
 ```bash
