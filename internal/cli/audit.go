@@ -21,6 +21,7 @@ type auditOptions struct {
 	force    bool
 	dryRun   bool
 	since    string
+	until    string
 	limit    int
 }
 
@@ -74,7 +75,10 @@ func newAuditCommand(global *GlobalOptions) *cobra.Command {
 	cmd.Flags().StringVar(&opts.approval, "approval", "", "Filter by approval state")
 	cmd.Flags().BoolVar(&opts.force, "force", false, "Show only forced operations")
 	cmd.Flags().BoolVar(&opts.dryRun, "dry-run", false, "Show only dry-run operations")
-	cmd.Flags().StringVar(&opts.since, "since", "", "Filter by time (e.g. 1h, 24h, 7d)")
+	// Default --since 24h ensures the date-bucket-index GSI is always used efficiently.
+	// Without a time bound, the API would need to query all daily partitions — expensive at scale.
+	cmd.Flags().StringVar(&opts.since, "since", "24h", "Start of time window (duration: 1h, 7d; date: 2026-08-25; RFC3339: 2026-08-25T14:00:00Z)")
+	cmd.Flags().StringVar(&opts.until, "until", "", "End of time window (same formats as --since; default: now)")
 	cmd.Flags().IntVar(&opts.limit, "limit", 50, "Max results (max 200)")
 
 	return cmd
@@ -110,6 +114,9 @@ func listAudit(ctx context.Context, global *GlobalOptions, opts *auditOptions) e
 	}
 	if opts.since != "" {
 		query.Set("since", opts.since)
+	}
+	if opts.until != "" {
+		query.Set("until", opts.until)
 	}
 	if opts.limit > 0 {
 		query.Set("limit", fmt.Sprintf("%d", opts.limit))

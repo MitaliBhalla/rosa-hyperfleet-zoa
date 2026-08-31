@@ -55,6 +55,9 @@ func (m *mockExecutionStore) Get(_ context.Context, id string) (*store.Execution
 func (m *mockExecutionStore) List(_ context.Context, _ string, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
 	return m.executions, nil
 }
+func (m *mockExecutionStore) ListAll(_ context.Context, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
+	return m.executions, nil
+}
 
 func (m *mockExecutionStore) TransitionStatus(_ context.Context, id string, from, to store.Status) error {
 	m.transitions = append(m.transitions, transitionRecord{ID: id, From: from, To: to})

@@ -75,6 +75,8 @@ zoa run get_resource --jira OSD-123 --namespace kube-system --resource pods --as
 # View results
 zoa runs --limit 10
 zoa runs -o wide              # Full details: dispatched/completed timestamps, log bytes
+zoa runs --since 7d           # Last 7 days
+zoa runs --since 2026-08-20 --until 2026-08-25  # Date range
 zoa get <exec-id> --include-output
 zoa output <exec-id>
 zoa logs <exec-id>
@@ -87,6 +89,8 @@ zoa get <exec-id> -o json
 
 # Audit
 zoa audit --limit 20
+zoa audit --since 7d --target my-cluster
+zoa audit --since 2026-08-01 --until 2026-08-15
 ```
 
 ## Global Flags
@@ -132,7 +136,8 @@ All filters are combinable:
 | `--scope` | | Filter by scope (kube-api, aws-api) |
 | `--type` | | Filter by type (read, write) |
 | `--execution-mode` | | Filter by execution class (sync, async) |
-| `--since` | | Filter by time window (e.g. 1h, 24h, 7d) |
+| `--since` | | Show entries after this point (default: `24h`). See [Time Formats](#time-formats). |
+| `--until` | | Show entries before this point. See [Time Formats](#time-formats). |
 | `--dry-run` | | Show only dry-run executions |
 | `--limit` | | Max results (max 100, default 20) |
 
@@ -156,7 +161,8 @@ All filters are combinable:
 | `--target` | `-t` | Filter by target cluster |
 | `--method` | | Filter by HTTP method (GET, POST) |
 | `--approval` | | Filter by approval state |
-| `--since` | | Filter by time window (e.g. 1h, 24h, 7d) |
+| `--since` | | Show entries after this point (default: `24h`). See [Time Formats](#time-formats). |
+| `--until` | | Show entries before this point. See [Time Formats](#time-formats). |
 | `--limit` | | Max results (max 200, default 50) |
 
 ## `download` Flags
@@ -165,6 +171,47 @@ All filters are combinable:
 |------|-------|-------------|
 | `--file` | `-f` | Destination file path (default: `zoa-<id>-<artifact>.json`) |
 | `--artifact` | | Which artifact to download: `output` (default), `logs` |
+
+## Time Formats
+
+Both `--since` and `--until` accept the same flexible formats:
+
+| Format | Example | Meaning |
+|--------|---------|---------|
+| Duration | `1h`, `24h`, `7d`, `30m`, `300s` | Relative to now (subtracted) |
+| Short date | `2026-08-25` | Start-of-day for `--since`, end-of-day for `--until` |
+| RFC3339 | `2026-08-25T14:30:00Z` | Exact timestamp |
+| RFC3339 with offset | `2026-08-25T16:30:00+02:00` | Exact timestamp (converted to UTC) |
+
+**Behavior notes:**
+
+- `--since` defaults to `24h` if not specified (shows last 24 hours)
+- `--until` is optional; when omitted, results go up to the present
+- Short dates are interpreted inclusively: `--since 2026-08-25` means "from the start of Aug 25" and `--until 2026-08-25` means "through the end of Aug 25"
+- Results are always sorted newest-first
+
+**Examples:**
+
+```bash
+# Last 24 hours (default)
+zoa runs
+
+# Last 7 days
+zoa runs --since 7d
+
+# Specific day range (inclusive)
+zoa runs --since 2026-08-20 --until 2026-08-25
+
+# Since a specific timestamp
+zoa runs --since 2026-08-25T09:00:00Z
+
+# Time window: between 2 hours ago and 30 minutes ago
+zoa runs --since 2h --until 30m
+
+# Same filters work on audit
+zoa audit --since 7d --target my-cluster
+zoa audit --since 2026-08-01 --until 2026-08-15
+```
 
 ## Shell Completion
 

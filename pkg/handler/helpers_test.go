@@ -51,6 +51,9 @@ func (m *mockExecStore) Get(_ context.Context, _ string) (*store.Execution, erro
 func (m *mockExecStore) List(_ context.Context, _ string, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
 	return nil, nil
 }
+func (m *mockExecStore) ListAll(_ context.Context, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
+	return nil, nil
+}
 func (m *mockExecStore) TransitionStatus(_ context.Context, _ string, _, _ store.Status) error {
 	return nil
 }

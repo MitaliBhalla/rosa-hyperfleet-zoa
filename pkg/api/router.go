@@ -215,55 +215,47 @@ func (h *Handler) handleGetExecution(w http.ResponseWriter, r *http.Request, id 
 }
 
 func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
-	accountID := r.Header.Get("X-Account-ID")
-	if accountID == "" {
-		writeError(w, http.StatusBadRequest, "missing_account", "X-Account-ID header required")
-		return
-	}
-
 	q := r.URL.Query()
 	filter := &store.ListFilter{}
-	hasFilter := false
 
+	if v := q.Get("target"); v != "" {
+		filter.Target = &v
+	}
 	if v := q.Get("status"); v != "" {
 		s := store.Status(v)
 		filter.Status = &s
-		hasFilter = true
 	}
 	if v := q.Get("execution_mode"); v != "" {
 		filter.ExecutionMode = &v
-		hasFilter = true
 	}
 	if v := q.Get("action"); v != "" {
 		filter.Action = &v
-		hasFilter = true
 	}
 	if v := q.Get("type"); v != "" {
 		filter.Type = &v
-		hasFilter = true
 	}
 	if v := q.Get("scope"); v != "" {
 		filter.Scope = &v
-		hasFilter = true
 	}
 	if v := q.Get("operator"); v != "" {
 		filter.Operator = &v
-		hasFilter = true
 	}
 	if q.Get("dry_run") == "true" {
 		dryRun := true
 		filter.DryRun = &dryRun
-		hasFilter = true
 	}
 	if q.Get("force") == "true" {
 		force := true
 		filter.Force = &force
-		hasFilter = true
 	}
 	if v := q.Get("since"); v != "" {
-		if t, err := parseSince(v); err == nil {
+		if t, err := parseTimeValue(v); err == nil {
 			filter.Since = &t
-			hasFilter = true
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if t, err := parseUntilTimeValue(v); err == nil {
+			filter.Before = &t
 		}
 	}
 
@@ -277,12 +269,7 @@ func (h *Handler) handleListExecutions(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Limit = limit
 
-	var filterPtr *store.ListFilter
-	if hasFilter || limit != 50 {
-		filterPtr = filter
-	}
-
-	executions, err := h.executionStore.List(r.Context(), accountID, limit, filterPtr)
+	executions, err := h.executionStore.ListAll(r.Context(), limit, filter)
 	if err != nil {
 		h.logger.Error("failed to list executions", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list executions")
@@ -313,18 +300,20 @@ func (h *Handler) handleListActions(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
-	accountID := r.Header.Get("X-Account-ID")
-	if accountID == "" {
-		writeError(w, http.StatusBadRequest, "missing_account", "X-Account-ID header required")
-		return
-	}
-
 	q := r.URL.Query()
 	filter := &store.AuditFilter{}
 
+	if v := q.Get("target"); v != "" {
+		filter.Target = &v
+	}
 	if v := q.Get("since"); v != "" {
-		if t, err := parseSince(v); err == nil {
+		if t, err := parseTimeValue(v); err == nil {
 			filter.Since = &t
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if t, err := parseUntilTimeValue(v); err == nil {
+			filter.Before = &t
 		}
 	}
 	if v := q.Get("action"); v != "" {
@@ -355,7 +344,7 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 	}
 	filter.Limit = limit
 
-	entries, err := h.auditStore.List(r.Context(), accountID, filter)
+	entries, err := h.auditStore.ListAll(r.Context(), filter)
 	if err != nil {
 		h.logger.Error("failed to list audit entries", "error", err)
 		writeError(w, http.StatusInternalServerError, "internal_error", "failed to list audit entries")
@@ -364,7 +353,7 @@ func (h *Handler) handleAudit(w http.ResponseWriter, r *http.Request) {
 
 	h.recordAudit(r, http.StatusOK, "", "")
 
-	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "total": len(entries)})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"items": entries, "count": len(entries)})
 }
 
 func (h *Handler) fetchArtifact(ctx context.Context, id, artifact string) ([]byte, error) {
@@ -431,6 +420,12 @@ func withDryRun(dryRun bool) AuditOption {
 	return func(o *auditOpts) { o.dryRun = dryRun }
 }
 
+// recordAudit persists an audit entry for the request. X-Account-ID and
+// X-Operator are always populated in legitimate requests because the ZOA CLI
+// sets them unconditionally (the CLI must have valid AWS credentials to sign
+// requests via SigV4, and it derives account-id from those credentials).
+// List/audit handlers no longer reject missing X-Account-ID to enable
+// cross-cluster visibility, but that path is unreachable from the CLI.
 func (h *Handler) recordAudit(r *http.Request, statusCode int, action, executionID string, opts ...AuditOption) {
 	if h.auditStore == nil {
 		return
@@ -463,15 +458,52 @@ func (h *Handler) recordAudit(r *http.Request, statusCode int, action, execution
 	}
 }
 
-func parseSince(s string) (time.Time, error) {
+// parseTimeValue parses flexible time formats for --since (lower bound):
+//   - Duration relative to now: "1h", "24h", "7d", "30m", "300s"
+//   - Short date (start of day UTC): "2026-08-25" → 2026-08-25T00:00:00Z
+//   - RFC3339 timestamp: "2026-08-25T14:00:00Z"
+//
+// For durations, the value is subtracted from now (e.g. "1h" = 1 hour ago).
+func parseTimeValue(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, nil
+	}
+	return parseDuration(s)
+}
+
+// parseUntilTimeValue parses flexible time formats for --until (upper bound).
+// Same formats as parseTimeValue, but short dates resolve to end-of-day
+// (i.e. +24h) following journalctl/Elasticsearch convention:
+//   - "2026-08-25" → 2026-08-26T00:00:00Z (includes all of Aug 25th)
+//   - RFC3339 and durations behave identically to parseTimeValue
+func parseUntilTimeValue(s string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse(time.RFC3339Nano, s); err == nil {
+		return t, nil
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t.Add(24 * time.Hour), nil
+	}
+	return parseDuration(s)
+}
+
+func parseDuration(s string) (time.Time, error) {
 	if len(s) < 2 {
-		return time.Time{}, fmt.Errorf("invalid since: %s", s)
+		return time.Time{}, fmt.Errorf("invalid time value: %s", s)
 	}
 	unit := s[len(s)-1]
 	numStr := s[:len(s)-1]
 	var n int
 	if _, err := fmt.Sscanf(numStr, "%d", &n); err != nil {
-		return time.Time{}, fmt.Errorf("invalid since: %s", s)
+		return time.Time{}, fmt.Errorf("invalid time value: %s", s)
 	}
 	var d time.Duration
 	switch unit {
@@ -484,7 +516,7 @@ func parseSince(s string) (time.Time, error) {
 	case 'd':
 		d = time.Duration(n) * 24 * time.Hour
 	default:
-		return time.Time{}, fmt.Errorf("invalid since unit: %c", unit)
+		return time.Time{}, fmt.Errorf("invalid time unit: %c", unit)
 	}
 	return time.Now().Add(-d), nil
 }

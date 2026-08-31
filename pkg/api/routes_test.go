@@ -103,15 +103,15 @@ func TestHandleListExecutions_WhenExecutionsExist_ItShouldReturnThem(t *testing.
 	}
 }
 
-func TestHandleListExecutions_WhenMissingAccountID_ItShouldReturn400(t *testing.T) {
+func TestHandleListExecutions_WhenNoAccountID_ItShouldStillReturn200(t *testing.T) {
 	h := testHandler(&mockExecStore{})
 
 	rr := doRequest(h, "GET", "/api/v0/trusted-actions/runs", nil, map[string]string{
 		"X-Operator": "sre@test.com",
 	})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -150,13 +150,13 @@ func TestHandleAudit_WhenEntriesExist_ItShouldReturnThem(t *testing.T) {
 	}
 }
 
-func TestHandleAudit_WhenMissingAccountID_ItShouldReturn400(t *testing.T) {
-	h := testHandler(&mockExecStore{})
+func TestHandleAudit_WhenNoAccountID_ItShouldStillReturn200(t *testing.T) {
+	h := testHandlerWithAudit(&mockExecStore{}, &mockAuditStoreWithData{})
 
 	rr := doRequest(h, "GET", "/api/v0/trusted-actions/audit", nil, map[string]string{})
 
-	if rr.Code != http.StatusBadRequest {
-		t.Errorf("expected 400, got %d: %s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d: %s", rr.Code, rr.Body.String())
 	}
 }
 
@@ -188,6 +188,9 @@ type errorExecStore struct {
 func (e *errorExecStore) List(_ context.Context, _ string, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
 	return nil, e.err
 }
+func (e *errorExecStore) ListAll(_ context.Context, _ int, _ *store.ListFilter) ([]*store.Execution, error) {
+	return nil, e.err
+}
 
 type mockAuditStoreWithData struct {
 	entries []*store.AuditEntry
@@ -195,6 +198,9 @@ type mockAuditStoreWithData struct {
 
 func (m *mockAuditStoreWithData) Record(_ context.Context, _ *store.AuditEntry) error { return nil }
 func (m *mockAuditStoreWithData) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return m.entries, nil
+}
+func (m *mockAuditStoreWithData) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return m.entries, nil
 }
 
@@ -232,6 +238,11 @@ func (m *filterCapturingExecStore) List(_ context.Context, _ string, limit int, 
 	m.capturedLimit = limit
 	return m.executions, nil
 }
+func (m *filterCapturingExecStore) ListAll(_ context.Context, limit int, filter *store.ListFilter) ([]*store.Execution, error) {
+	m.capturedFilter = filter
+	m.capturedLimit = limit
+	return m.executions, nil
+}
 
 type filterCapturingAuditStore struct {
 	entries        []*store.AuditEntry
@@ -240,6 +251,10 @@ type filterCapturingAuditStore struct {
 
 func (m *filterCapturingAuditStore) Record(_ context.Context, _ *store.AuditEntry) error { return nil }
 func (m *filterCapturingAuditStore) List(_ context.Context, _ string, filter *store.AuditFilter) ([]*store.AuditEntry, error) {
+	m.capturedFilter = filter
+	return m.entries, nil
+}
+func (m *filterCapturingAuditStore) ListAll(_ context.Context, filter *store.AuditFilter) ([]*store.AuditEntry, error) {
 	m.capturedFilter = filter
 	return m.entries, nil
 }
@@ -277,6 +292,42 @@ func TestHandleListExecutions_WhenFiltersProvided_ItShouldPassFilterToStore(t *t
 	}
 	if f.Limit != 10 {
 		t.Errorf("expected limit=10, got %d", f.Limit)
+	}
+}
+
+func TestHandleListExecutions_WhenTargetProvided_ItShouldPassTargetFilter(t *testing.T) {
+	execStore := &filterCapturingExecStore{}
+	h := testHandler(execStore)
+
+	rr := doRequest(h, "GET", "/api/v0/trusted-actions/runs?target=eph-dev-mc01", nil, defaultHeaders())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	f := execStore.capturedFilter
+	if f == nil {
+		t.Fatal("expected filter to be passed to store")
+	}
+	if f.Target == nil || *f.Target != "eph-dev-mc01" {
+		t.Errorf("expected target=eph-dev-mc01, got %v", f.Target)
+	}
+}
+
+func TestHandleAudit_WhenTargetProvided_ItShouldPassTargetFilter(t *testing.T) {
+	auditStore := &filterCapturingAuditStore{}
+	h := testHandlerWithAudit(&mockExecStore{}, auditStore)
+
+	rr := doRequest(h, "GET", "/api/v0/trusted-actions/audit?target=eph-dev-rc", nil, defaultHeaders())
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rr.Code, rr.Body.String())
+	}
+	f := auditStore.capturedFilter
+	if f == nil {
+		t.Fatal("expected filter to be passed to store")
+	}
+	if f.Target == nil || *f.Target != "eph-dev-rc" {
+		t.Errorf("expected target=eph-dev-rc, got %v", f.Target)
 	}
 }
 
@@ -343,6 +394,9 @@ func (m *auditCapturingStore) Record(_ context.Context, e *store.AuditEntry) err
 func (m *auditCapturingStore) List(_ context.Context, _ string, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
 	return m.entries, nil
 }
+func (m *auditCapturingStore) ListAll(_ context.Context, _ *store.AuditFilter) ([]*store.AuditEntry, error) {
+	return m.entries, nil
+}
 
 func TestHandleGetExecution_WhenFound_ItShouldRecordAudit(t *testing.T) {
 	execStore := &mockExecStore{
@@ -407,9 +461,9 @@ func TestHandleAudit_WhenCalled_ItShouldRecordAudit(t *testing.T) {
 	}
 }
 
-// --- parseSince ---
+// --- parseTimeValue ---
 
-func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
+func TestParseTimeValue_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 	cases := []struct {
 		input  string
 		minAgo int64
@@ -424,7 +478,7 @@ func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.input, func(t *testing.T) {
-			result, err := parseSince(tc.input)
+			result, err := parseTimeValue(tc.input)
 			if err != nil {
 				t.Fatalf("unexpected error for %q: %v", tc.input, err)
 			}
@@ -436,11 +490,91 @@ func TestParseSince_WhenValidDurations_ItShouldReturnCorrectTime(t *testing.T) {
 	}
 }
 
-func TestParseSince_WhenInvalid_ItShouldReturnError(t *testing.T) {
+func TestParseTimeValue_WhenShortDate_ItShouldReturnStartOfDay(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseTimeValue_WhenRFC3339_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25T14:30:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseTimeValue_WhenRFC3339WithOffset_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseTimeValue("2026-08-25T16:30:00+02:00")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.UTC().Equal(expected) {
+		t.Errorf("expected %v UTC, got %v UTC", expected, result.UTC())
+	}
+}
+
+func TestParseTimeValue_WhenInvalid_ItShouldReturnError(t *testing.T) {
 	cases := []string{"", "h", "abc", "1x", "1"}
 	for _, input := range cases {
 		t.Run(input, func(t *testing.T) {
-			_, err := parseSince(input)
+			_, err := parseTimeValue(input)
+			if err == nil {
+				t.Errorf("expected error for %q, got nil", input)
+			}
+		})
+	}
+}
+
+// --- parseUntilTimeValue ---
+
+func TestParseUntilTimeValue_WhenShortDate_ItShouldReturnEndOfDay(t *testing.T) {
+	result, err := parseUntilTimeValue("2026-08-25")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 26, 0, 0, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v (end of 2026-08-25), got %v", expected, result)
+	}
+}
+
+func TestParseUntilTimeValue_WhenRFC3339_ItShouldReturnExactTime(t *testing.T) {
+	result, err := parseUntilTimeValue("2026-08-25T14:30:00Z")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	expected := time.Date(2026, 8, 25, 14, 30, 0, 0, time.UTC)
+	if !result.Equal(expected) {
+		t.Errorf("expected %v, got %v", expected, result)
+	}
+}
+
+func TestParseUntilTimeValue_WhenDuration_ItShouldSubtractFromNow(t *testing.T) {
+	result, err := parseUntilTimeValue("1h")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	agoSec := int64(time.Since(result).Seconds())
+	if agoSec < 3500 || agoSec > 3700 {
+		t.Errorf("expected ~3600s ago, got %ds", agoSec)
+	}
+}
+
+func TestParseUntilTimeValue_WhenInvalid_ItShouldReturnError(t *testing.T) {
+	cases := []string{"", "h", "abc", "1x", "1"}
+	for _, input := range cases {
+		t.Run(input, func(t *testing.T) {
+			_, err := parseUntilTimeValue(input)
 			if err == nil {
 				t.Errorf("expected error for %q, got nil", input)
 			}

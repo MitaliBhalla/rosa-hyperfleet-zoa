@@ -17,6 +17,11 @@ type ExecutionStore interface {
 	Get(ctx context.Context, executionID string) (*Execution, error)
 	List(ctx context.Context, accountID string, limit int, filter *ListFilter) ([]*Execution, error)
 
+	// ListAll returns executions across all accounts via date-bucket-index.
+	// All optional filters (target, status, action, etc.) are applied as
+	// DynamoDB FilterExpressions server-side.
+	ListAll(ctx context.Context, limit int, filter *ListFilter) ([]*Execution, error)
+
 	// TransitionStatus atomically transitions status from→to using DynamoDB conditional writes.
 	// Returns error (ConditionalCheckFailedException) if current status != from.
 	TransitionStatus(ctx context.Context, id string, from, to Status) error
@@ -66,6 +71,7 @@ func NewExecutionStore(client DynamoDBAPI, tableName string, ttlDays int) *Dynam
 func (s *DynamoDBExecutionStore) Create(ctx context.Context, exec *Execution) error {
 	exec.TTL = time.Now().AddDate(0, 0, s.ttlDays).Unix()
 	exec.TargetStatusKey = string(exec.Status) + "#" + exec.CreatedAt
+	exec.DateBucket = exec.CreatedAt[:10]
 
 	item, err := attributevalue.MarshalMap(exec)
 	if err != nil {
@@ -117,6 +123,84 @@ func (s *DynamoDBExecutionStore) List(ctx context.Context, accountID string, lim
 	}
 
 	return s.listByAccount(ctx, accountID, filter, resultLimit)
+}
+
+// ListAll returns executions across all accounts via date-bucket-index GSI
+// (PK=dateBucket, SK=createdAt). All optional filters (target, status, action,
+// etc.) are applied as DynamoDB FilterExpressions on the server side.
+//
+// The date-bucket-index path requires a time bound (filter.Since) to function.
+// The CLI enforces a default of 24h, ensuring no unbounded queries ever reach DynamoDB.
+func (s *DynamoDBExecutionStore) ListAll(ctx context.Context, limit int, filter *ListFilter) ([]*Execution, error) {
+	resultLimit := limit
+	if filter != nil && filter.Limit > 0 {
+		resultLimit = filter.Limit
+	}
+
+	return s.listAllByDateBucket(ctx, filter, resultLimit)
+}
+
+// listAllByDateBucket queries the date-bucket-index GSI day-by-day from today
+// (or filter.Before) backwards until the Since boundary. Each bucket query returns
+// items sorted by createdAt descending (newest first within that day). Because we
+// iterate buckets from newest to oldest, the combined result is naturally newest-first.
+func (s *DynamoDBExecutionStore) listAllByDateBucket(ctx context.Context, filter *ListFilter, resultLimit int) ([]*Execution, error) {
+	since := time.Now().Add(-24 * time.Hour)
+	if filter != nil && filter.Since != nil {
+		since = *filter.Since
+	}
+
+	endTime := time.Now().UTC()
+	if filter != nil && filter.Before != nil {
+		endTime = filter.Before.UTC()
+	}
+
+	sinceStr := since.Format(time.RFC3339Nano)
+	endDay := endTime.Truncate(24 * time.Hour)
+	startDay := since.UTC().Truncate(24 * time.Hour)
+
+	var executions []*Execution
+	for day := endDay; !day.Before(startDay); day = day.AddDate(0, 0, -1) {
+		bucket := day.Format("2006-01-02")
+
+		var keyCond expression.KeyConditionBuilder
+		if filter != nil && filter.Before != nil {
+			beforeStr := filter.Before.Format(time.RFC3339Nano)
+			keyCond = expression.KeyAnd(
+				expression.Key("dateBucket").Equal(expression.Value(bucket)),
+				expression.Key("createdAt").Between(
+					expression.Value(sinceStr),
+					expression.Value(beforeStr),
+				),
+			)
+		} else {
+			keyCond = expression.KeyAnd(
+				expression.Key("dateBucket").Equal(expression.Value(bucket)),
+				expression.Key("createdAt").GreaterThanEqual(expression.Value(sinceStr)),
+			)
+		}
+
+		builder := expression.NewBuilder().WithKeyCondition(keyCond)
+		builder = s.applyFilterConditions(builder, filter, false)
+
+		expr, err := builder.Build()
+		if err != nil {
+			return nil, fmt.Errorf("building date-bucket query expression: %w", err)
+		}
+
+		items, err := s.paginateQuery(ctx, expr, aws.String("date-bucket-index"), 0)
+		if err != nil {
+			return nil, err
+		}
+		executions = append(executions, items...)
+
+		if resultLimit > 0 && len(executions) >= resultLimit {
+			executions = executions[:resultLimit]
+			return executions, nil
+		}
+	}
+
+	return executions, nil
 }
 
 // listByAccount queries account-index GSI (PK=accountId, SK=createdAt).
@@ -210,6 +294,9 @@ func (s *DynamoDBExecutionStore) applyFilterConditions(builder expression.Builde
 	}
 
 	var conditions []expression.ConditionBuilder
+	if filter.Target != nil {
+		conditions = append(conditions, expression.Name("targetCluster").Equal(expression.Value(*filter.Target)))
+	}
 	if !skipStatus && filter.Status != nil {
 		conditions = append(conditions, expression.Name("status").Equal(expression.Value(string(*filter.Status))))
 	}
@@ -532,44 +619,32 @@ func (s *DynamoDBExecutionStore) MarkCleaned(ctx context.Context, id string) err
 }
 
 func (s *DynamoDBExecutionStore) ListByTargetAndAction(ctx context.Context, target, action string, since time.Time) ([]*Execution, error) {
-	keyCond := expression.KeyAnd(
-		expression.Key("targetCluster").Equal(expression.Value(target)),
-		expression.Key("createdAt").GreaterThanEqual(expression.Value(since.Format(time.RFC3339Nano))),
-	)
+	sinceStr := since.Format(time.RFC3339Nano)
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	startDay := since.UTC().Truncate(24 * time.Hour)
 
-	filterExpr := expression.Name("action").Equal(expression.Value(action))
-
-	expr, err := expression.NewBuilder().WithKeyCondition(keyCond).WithFilter(filterExpr).Build()
-	if err != nil {
-		return nil, fmt.Errorf("building query expression: %w", err)
-	}
+	filterExpr := expression.Name("targetCluster").Equal(expression.Value(target)).
+		And(expression.Name("action").Equal(expression.Value(action)))
 
 	var all []*Execution
-	var lastKey map[string]types.AttributeValue
-	for {
-		input := &dynamodb.QueryInput{
-			TableName:                 &s.tableName,
-			IndexName:                 aws.String("target-index"),
-			KeyConditionExpression:    expr.KeyCondition(),
-			FilterExpression:          expr.Filter(),
-			ExpressionAttributeNames:  expr.Names(),
-			ExpressionAttributeValues: expr.Values(),
-			ScanIndexForward:          aws.Bool(false),
-			ExclusiveStartKey:         lastKey,
-		}
-		out, err := s.client.Query(ctx, input)
+	for day := today; !day.Before(startDay); day = day.AddDate(0, 0, -1) {
+		bucket := day.Format("2006-01-02")
+
+		keyCond := expression.KeyAnd(
+			expression.Key("dateBucket").Equal(expression.Value(bucket)),
+			expression.Key("createdAt").GreaterThanEqual(expression.Value(sinceStr)),
+		)
+
+		expr, err := expression.NewBuilder().WithKeyCondition(keyCond).WithFilter(filterExpr).Build()
 		if err != nil {
-			return nil, fmt.Errorf("querying executions by target and action: %w", err)
+			return nil, fmt.Errorf("building query expression: %w", err)
 		}
-		items, err := unmarshalExecutions(out.Items)
+
+		items, err := s.paginateQuery(ctx, expr, aws.String("date-bucket-index"), 0)
 		if err != nil {
 			return nil, err
 		}
 		all = append(all, items...)
-		if out.LastEvaluatedKey == nil {
-			break
-		}
-		lastKey = out.LastEvaluatedKey
 	}
 	return all, nil
 }

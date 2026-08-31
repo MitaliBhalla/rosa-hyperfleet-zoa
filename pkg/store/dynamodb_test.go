@@ -459,11 +459,14 @@ func TestDynamoDBExecutionStore_QueryTerminal_WhenSuccess_ItShouldQueryAllTermin
 	}
 }
 
-func TestDynamoDBExecutionStore_ListByTargetAndAction_WhenSuccess_ItShouldUseTargetIndex(t *testing.T) {
+func TestDynamoDBExecutionStore_ListByTargetAndAction_WhenSuccess_ItShouldUseDateBucketIndex(t *testing.T) {
 	mock := &mockDynamoDBAPI{
 		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
-			if *params.IndexName != "target-index" {
-				t.Errorf("expected target-index, got %q", *params.IndexName)
+			if *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index, got %q", *params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing targetCluster and action")
 			}
 			return &dynamodb.QueryOutput{Items: nil}, nil
 		},
@@ -757,6 +760,607 @@ func TestDynamoDBAuditStore_List_WhenMethodFilter_ItShouldApplyFilterExpression(
 	}
 	if len(results) != 1 {
 		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+// --- ListAll tests ---
+
+func TestDynamoDBExecutionStore_ListAll_WhenNoTargetOrStatus_ItShouldQueryDateBucketIndex(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCalled = true
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index GSI, got %v", params.IndexName)
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query on date-bucket-index for ListAll without target/status")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenSinceSpansMultipleDays_ItShouldQueryMultipleBuckets(t *testing.T) {
+	bucketsQueried := make(map[string]bool)
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				for _, v := range params.ExpressionAttributeValues {
+					if s, ok := v.(*types.AttributeValueMemberS); ok {
+						if len(s.Value) == 10 {
+							bucketsQueried[s.Value] = true
+						}
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-3 * 24 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(bucketsQueried) < 3 {
+		t.Errorf("expected at least 3 day-buckets queried for --since 3d, got %d", len(bucketsQueried))
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenBucketEmpty_ItShouldContinueToPreviousBucket(t *testing.T) {
+	now := time.Now().UTC()
+	today := now.Format("2006-01-02")
+	yesterday := now.AddDate(0, 0, -1).Format("2006-01-02")
+
+	callCount := 0
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			callCount++
+			for _, v := range params.ExpressionAttributeValues {
+				if s, ok := v.(*types.AttributeValueMemberS); ok && s.Value == today {
+					return &dynamodb.QueryOutput{}, nil
+				}
+			}
+			for _, v := range params.ExpressionAttributeValues {
+				if s, ok := v.(*types.AttributeValueMemberS); ok && s.Value == yesterday {
+					item, _ := attributevalue.MarshalMap(&Execution{
+						ID:        "exec-yesterday",
+						AccountID: "111",
+						Status:    StatusSucceeded,
+						CreatedAt: now.AddDate(0, 0, -1).Format(time.RFC3339Nano),
+					})
+					return &dynamodb.QueryOutput{Items: []map[string]types.AttributeValue{item}}, nil
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := now.Add(-48 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	results, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result from yesterday's bucket, got %d", len(results))
+	}
+	if callCount < 2 {
+		t.Errorf("expected at least 2 Query calls (today empty + yesterday), got %d", callCount)
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenStatusProvided_ItShouldQueryDateBucketIndexWithStatusFilter(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCalled = true
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index GSI, got %v", params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing status filter")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	status := StatusFailed
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Status: &status, Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query to be called for ListAll with status")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenTargetProvided_ItShouldQueryDateBucketIndexWithTargetFilter(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCalled = true
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index GSI, got %v", params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing targetCluster filter")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	target := "eph-dev-mc01"
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Target: &target, Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query to be called for ListAll with target")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenTargetAndStatusProvided_ItShouldQueryDateBucketIndexWithBothFilters(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCalled = true
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index GSI, got %v", params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing both targetCluster and status filters")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	target := "eph-dev-mc01"
+	status := StatusDispatched
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Target: &target, Status: &status, Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query to be called when both target and status are provided")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenDateBucketReturnsItems_ItShouldDeserializeThem(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	todayBucket := time.Now().UTC().Format("2006-01-02")
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				for _, v := range params.ExpressionAttributeValues {
+					if s, ok := v.(*types.AttributeValueMemberS); ok && s.Value == todayBucket {
+						return &dynamodb.QueryOutput{
+							Items: []map[string]types.AttributeValue{
+								{
+									"executionId":   &types.AttributeValueMemberS{Value: "exec-001"},
+									"accountId":     &types.AttributeValueMemberS{Value: "111111111111"},
+									"targetCluster": &types.AttributeValueMemberS{Value: "mc-alpha"},
+									"action":        &types.AttributeValueMemberS{Value: "get_resource"},
+									"status":        &types.AttributeValueMemberS{Value: "completed"},
+									"createdAt":     &types.AttributeValueMemberS{Value: now},
+									"operator":      &types.AttributeValueMemberS{Value: "user@redhat.com"},
+									"executionMode": &types.AttributeValueMemberS{Value: "sync"},
+									"scope":         &types.AttributeValueMemberS{Value: "kube-api"},
+									"type":          &types.AttributeValueMemberS{Value: "read"},
+								},
+								{
+									"executionId":   &types.AttributeValueMemberS{Value: "exec-002"},
+									"accountId":     &types.AttributeValueMemberS{Value: "222222222222"},
+									"targetCluster": &types.AttributeValueMemberS{Value: "mc-beta"},
+									"action":        &types.AttributeValueMemberS{Value: "list_eks_clusters"},
+									"status":        &types.AttributeValueMemberS{Value: "failed"},
+									"createdAt":     &types.AttributeValueMemberS{Value: now},
+									"operator":      &types.AttributeValueMemberS{Value: "admin@redhat.com"},
+									"executionMode": &types.AttributeValueMemberS{Value: "sync"},
+									"scope":         &types.AttributeValueMemberS{Value: "aws-api"},
+									"type":          &types.AttributeValueMemberS{Value: "read"},
+								},
+							},
+						}, nil
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	results, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].ID != "exec-001" || results[0].TargetCluster != "mc-alpha" {
+		t.Errorf("first result mismatch: %+v", results[0])
+	}
+	if results[1].ID != "exec-002" || results[1].TargetCluster != "mc-beta" {
+		t.Errorf("second result mismatch: %+v", results[1])
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenLimitReached_ItShouldTruncateResults(t *testing.T) {
+	now := time.Now().UTC()
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				items := make([]map[string]types.AttributeValue, 5)
+				for i := range items {
+					items[i] = map[string]types.AttributeValue{
+						"executionId":   &types.AttributeValueMemberS{Value: fmt.Sprintf("exec-%03d", i)},
+						"accountId":     &types.AttributeValueMemberS{Value: "111111111111"},
+						"targetCluster": &types.AttributeValueMemberS{Value: "mc-alpha"},
+						"action":        &types.AttributeValueMemberS{Value: "get_resource"},
+						"status":        &types.AttributeValueMemberS{Value: "completed"},
+						"createdAt":     &types.AttributeValueMemberS{Value: now.Add(-time.Duration(i) * time.Minute).Format(time.RFC3339Nano)},
+						"operator":      &types.AttributeValueMemberS{Value: "user@redhat.com"},
+						"executionMode": &types.AttributeValueMemberS{Value: "sync"},
+						"scope":         &types.AttributeValueMemberS{Value: "kube-api"},
+						"type":          &types.AttributeValueMemberS{Value: "read"},
+					}
+				}
+				return &dynamodb.QueryOutput{Items: items}, nil
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	results, err := s.ListAll(context.Background(), 3, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("expected limit of 3 results, got %d", len(results))
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenQueryError_ItShouldReturnError(t *testing.T) {
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				return nil, fmt.Errorf("throttling exception")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenStatusWithSince_ItShouldQueryDateBucketIndexWithTimeRange(t *testing.T) {
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index, got %v", params.IndexName)
+			}
+			if params.KeyConditionExpression == nil {
+				t.Error("expected key condition expression")
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing status filter")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	status := StatusDispatched
+	since := time.Now().Add(-1 * time.Hour)
+	filter := &ListFilter{Status: &status, Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenSinceAndBefore_ItShouldUseBetweenKeyCondition(t *testing.T) {
+	usedBetween := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				if params.KeyConditionExpression != nil {
+					expr := *params.KeyConditionExpression
+					hasBetween := false
+					for _, v := range params.ExpressionAttributeValues {
+						_ = v
+					}
+					if len(expr) > 0 {
+						hasBetween = len(params.ExpressionAttributeValues) >= 3
+					}
+					if hasBetween {
+						usedBetween = true
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := time.Now().Add(-24 * time.Hour)
+	before := time.Now().Add(-1 * time.Hour)
+	filter := &ListFilter{Since: &since, Before: &before}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !usedBetween {
+		t.Error("expected Between key condition when both Since and Before are set (need at least 3 expression attribute values: dateBucket + sinceStr + beforeStr)")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenBeforeSet_ItShouldStartFromBeforeDay(t *testing.T) {
+	now := time.Now().UTC()
+	before := now.Add(-48 * time.Hour)
+	beforeDay := before.Truncate(24 * time.Hour).Format("2006-01-02")
+
+	bucketsQueried := map[string]bool{}
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				for _, v := range params.ExpressionAttributeValues {
+					if s, ok := v.(*types.AttributeValueMemberS); ok {
+						if len(s.Value) == 10 {
+							bucketsQueried[s.Value] = true
+						}
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	since := now.Add(-72 * time.Hour)
+	filter := &ListFilter{Since: &since, Before: &before}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	todayStr := now.Truncate(24 * time.Hour).Format("2006-01-02")
+	if bucketsQueried[todayStr] {
+		t.Errorf("should NOT query today's bucket (%s) when --until is 2 days ago", todayStr)
+	}
+	if !bucketsQueried[beforeDay] {
+		t.Errorf("should query the --until day bucket (%s)", beforeDay)
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenSinceAndBefore_ItShouldUseBetweenKeyCondition(t *testing.T) {
+	usedBetween := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				if params.KeyConditionExpression != nil {
+					if len(params.ExpressionAttributeValues) >= 3 {
+						usedBetween = true
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	store := NewAuditStore(mock, "audit-table", 365)
+	since := time.Now().Add(-24 * time.Hour)
+	before := time.Now().Add(-1 * time.Hour)
+	filter := &AuditFilter{Since: &since, Before: &before}
+	_, err := store.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !usedBetween {
+		t.Error("expected Between key condition when both Since and Before are set for audit")
+	}
+}
+
+func TestDynamoDBExecutionStore_ListAll_WhenFilterWithAction_ItShouldApplyFilterExpression(t *testing.T) {
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				if params.FilterExpression == nil {
+					t.Error("expected filter expression for action filter on date-bucket-index")
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewExecutionStore(mock, "executions-table", 30)
+	action := "get_resource"
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &ListFilter{Action: &action, Since: &since}
+	_, err := s.ListAll(context.Background(), 50, filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenNoTarget_ItShouldQueryDateBucketIndex(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				queryCalled = true
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewAuditStore(mock, "audit-table", 90)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &AuditFilter{Since: &since}
+	_, err := s.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query on date-bucket-index for ListAll without target")
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenTargetProvided_ItShouldQueryDateBucketIndexWithTargetFilter(t *testing.T) {
+	queryCalled := false
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			queryCalled = true
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index GSI, got %v", params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing targetCluster filter")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewAuditStore(mock, "audit-table", 90)
+	target := "eph-dev-rc"
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &AuditFilter{Target: &target, Since: &since}
+	_, err := s.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !queryCalled {
+		t.Error("expected Query to be called for ListAll with target")
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenDateBucketReturnsItems_ItShouldDeserializeThem(t *testing.T) {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	todayBucket := time.Now().UTC().Format("2006-01-02")
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				for _, v := range params.ExpressionAttributeValues {
+					if s, ok := v.(*types.AttributeValueMemberS); ok && s.Value == todayBucket {
+						return &dynamodb.QueryOutput{
+							Items: []map[string]types.AttributeValue{
+								{
+									"accountId":     &types.AttributeValueMemberS{Value: "111111111111"},
+									"timestamp":     &types.AttributeValueMemberS{Value: now},
+									"method":        &types.AttributeValueMemberS{Value: "POST"},
+									"path":          &types.AttributeValueMemberS{Value: "/v1/executions"},
+									"statusCode":    &types.AttributeValueMemberN{Value: "200"},
+									"operator":      &types.AttributeValueMemberS{Value: "user@redhat.com"},
+									"targetCluster": &types.AttributeValueMemberS{Value: "mc-alpha"},
+									"action":        &types.AttributeValueMemberS{Value: "get_resource"},
+								},
+								{
+									"accountId":     &types.AttributeValueMemberS{Value: "222222222222"},
+									"timestamp":     &types.AttributeValueMemberS{Value: now},
+									"method":        &types.AttributeValueMemberS{Value: "GET"},
+									"path":          &types.AttributeValueMemberS{Value: "/v1/executions"},
+									"statusCode":    &types.AttributeValueMemberN{Value: "200"},
+									"operator":      &types.AttributeValueMemberS{Value: "admin@redhat.com"},
+									"targetCluster": &types.AttributeValueMemberS{Value: "mc-beta"},
+								},
+							},
+						}, nil
+					}
+				}
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewAuditStore(mock, "audit-table", 90)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &AuditFilter{Since: &since}
+	results, err := s.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].AccountID != "111111111111" || results[0].TargetCluster != "mc-alpha" {
+		t.Errorf("first audit entry mismatch: %+v", results[0])
+	}
+	if results[1].AccountID != "222222222222" || results[1].TargetCluster != "mc-beta" {
+		t.Errorf("second audit entry mismatch: %+v", results[1])
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenQueryError_ItShouldReturnError(t *testing.T) {
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName != nil && *params.IndexName == "date-bucket-index" {
+				return nil, fmt.Errorf("service unavailable")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewAuditStore(mock, "audit-table", 90)
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &AuditFilter{Since: &since}
+	_, err := s.ListAll(context.Background(), filter)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestDynamoDBAuditStore_ListAll_WhenTargetWithFilter_ItShouldQueryDateBucketIndexWithFilterExpression(t *testing.T) {
+	mock := &mockDynamoDBAPI{
+		queryFn: func(_ context.Context, params *dynamodb.QueryInput, _ ...func(*dynamodb.Options)) (*dynamodb.QueryOutput, error) {
+			if params.IndexName == nil || *params.IndexName != "date-bucket-index" {
+				t.Errorf("expected date-bucket-index, got %v", params.IndexName)
+			}
+			if params.FilterExpression == nil {
+				t.Error("expected FilterExpression containing target and action filters")
+			}
+			return &dynamodb.QueryOutput{}, nil
+		},
+	}
+
+	s := NewAuditStore(mock, "audit-table", 90)
+	target := "eph-dev-mc01"
+	action := "get_resource"
+	since := time.Now().Add(-24 * time.Hour)
+	filter := &AuditFilter{Target: &target, Action: &action, Since: &since}
+	_, err := s.ListAll(context.Background(), filter)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
