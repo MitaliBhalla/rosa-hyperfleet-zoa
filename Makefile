@@ -1,4 +1,4 @@
-.PHONY: all build dist print-version clean install test fmt fmt-check vet lint verify tidy \
+.PHONY: all build dist print-version clean install test fmt fmt-check vet lint verify tidy verify-mod \
        image image-runner image-push image-push-runner help
 
 BINARY_NAME = zoa
@@ -74,6 +74,10 @@ install:
 
 tidy:
 	@go mod tidy
+	@cd $(TOOLS_DIR) && go mod tidy
+
+verify-mod: tidy
+	@git diff --exit-code go.mod go.sum $(TOOLS_DIR)/go.mod $(TOOLS_DIR)/go.sum
 
 # =============================================================================
 # Test
